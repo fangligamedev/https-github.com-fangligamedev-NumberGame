@@ -26,14 +26,13 @@ const initAI = () => {
 async function fetchOpenAICompat(
     messages: { role: string; content: string }[], 
     systemInstruction?: string,
-    model: string = "gemini-3-flash-preview"
+    model: string = "gemini-3-flash-preview",
+    jsonMode: boolean = false // 新增参数控制是否使用 JSON 模式
 ): Promise<string | null> {
     if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_API_BASE_URL) return null;
 
     try {
         const payloadMessages = [];
-        // Gemini 模型的 OpenAI 兼容接口通常对 'system' 角色比较挑剔
-        // 我们将系统提示词合并到第一条人类消息中，以获得最高兼容性
         if (systemInstruction) {
             payloadMessages.push({ role: 'user', content: `[系统指令]: ${systemInstruction}\n\n[用户请求]: ${messages[0].content}` });
             payloadMessages.push(...messages.slice(1));
@@ -45,26 +44,31 @@ async function fetchOpenAICompat(
         if (!baseUrl.endsWith('/')) baseUrl += '/';
         const url = `${baseUrl}chat/completions`;
 
+        const body: any = {
+            model: model,
+            messages: payloadMessages,
+            temperature: 0.7,
+        };
+
+        // 仅在需要生成 Boss 题目等结构化数据时启用 JSON 模式
+        if (jsonMode) {
+            body.response_format = { type: "json_object" };
+        }
+
         const response = await fetch(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${process.env.GEMINI_API_KEY}`
             },
-            body: JSON.stringify({
-                model: model,
-                messages: payloadMessages,
-                temperature: 0.7,
-                response_format: { type: "json_object" } // 强制要求 JSON 格式
-            })
+            body: JSON.stringify(body)
         });
 
         if (!response.ok) {
             const errText = await response.text();
             console.error("Zeabur/OpenAI Fetch Error:", response.status, errText);
-            // 尝试备用模型名称 (带 google/ 前缀)
             if (response.status === 404 && !model.includes('/')) {
-                return fetchOpenAICompat(messages, systemInstruction, `google/${model}`);
+                return fetchOpenAICompat(messages, systemInstruction, `google/${model}`, jsonMode);
             }
             return null;
         }
