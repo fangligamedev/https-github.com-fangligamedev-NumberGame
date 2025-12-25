@@ -267,18 +267,18 @@ export const analyzeStage = async (questions: Question[], answers: {qId: string,
 export const generateBossQuestion = async (level: number, operators: Operator[], stageNum: number): Promise<{text: string, answer: number} | null> => {
     const opString = operators.join(', ');
     
-    // Determine Difficulty Context based on Stage
+    // Determine Difficulty Context based on Stage (Shanghai 3rd Grade+ Standards)
     let difficultyContext = "";
     if (stageNum <= 10) {
-        difficultyContext = "非常简单。数字在20以内。简单的加减法应用题。";
+        difficultyContext = "上海小学三年级水平。三位数加减法，或两位数乘一位数。有趣的数学故事。";
     } else if (stageNum <= 20) {
-        difficultyContext = "简单。数字在50以内。两步计算的加减法应用题。";
+        difficultyContext = "三年级进阶。包含括号的混合运算，三位数加减混合，或简单的除法应用题。";
     } else if (stageNum <= 30) {
-        difficultyContext = "中等难度。引入乘法口诀(2-9)。简单有趣的应用场景。";
+        difficultyContext = "三年级/四年级水平。两位数乘两位数，或三位数除以一位数。逻辑性较强的应用题。";
     } else if (stageNum <= 50) {
-        difficultyContext = "困难。包含加减乘除四则运算，数字在100以内。逻辑谜题。";
+        difficultyContext = "中高年级水平。多步混合运算(四则运算综合)，数字在500以内。包含单位换算或简单的几何面积逻辑。";
     } else {
-        difficultyContext = "史诗级挑战。数字在500-1000以内。复杂的多步应用题逻辑。";
+        difficultyContext = "高年级挑战。大数综合运算(1000以内)，复杂的多步逻辑推理，或者是数阵图/巧算类题目。";
     }
 
     const prompt = `你是一个小学数学老师。请生成一个有趣的Boss战数学应用题。
