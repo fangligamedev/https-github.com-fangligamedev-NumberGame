@@ -31,15 +31,16 @@ async function fetchOpenAICompat(
     if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_API_BASE_URL) return null;
 
     try {
-        const payloadMessages = [...messages];
+        const payloadMessages = [];
+        // Gemini 模型的 OpenAI 兼容接口通常对 'system' 角色比较挑剔
+        // 我们将系统提示词合并到第一条人类消息中，以获得最高兼容性
         if (systemInstruction) {
-            // Prepend system instruction as Zeabur/OpenAI compatible 'system' message
-            payloadMessages.unshift({ role: 'system', content: systemInstruction });
+            payloadMessages.push({ role: 'user', content: `[系统指令]: ${systemInstruction}\n\n[用户请求]: ${messages[0].content}` });
+            payloadMessages.push(...messages.slice(1));
+        } else {
+            payloadMessages.push(...messages);
         }
 
-        // Adjust endpoint: ensure it ends with /chat/completions or whatever the proxy expects
-        // Zeabur usually provides a base URL like https://api.zeabur.com/gemini/v1
-        // We need to append /chat/completions for standard OpenAI compatibility
         let baseUrl = process.env.GEMINI_API_BASE_URL;
         if (!baseUrl.endsWith('/')) baseUrl += '/';
         const url = `${baseUrl}chat/completions`;
@@ -53,14 +54,19 @@ async function fetchOpenAICompat(
             body: JSON.stringify({
                 model: model,
                 messages: payloadMessages,
-                temperature: 0.7
+                temperature: 0.7,
+                response_format: { type: "json_object" } // 强制要求 JSON 格式
             })
         });
 
         if (!response.ok) {
             const errText = await response.text();
             console.error("Zeabur/OpenAI Fetch Error:", response.status, errText);
-            return `System Error (${response.status}): ${errText.substring(0, 100)}`;
+            // 尝试备用模型名称 (带 google/ 前缀)
+            if (response.status === 404 && !model.includes('/')) {
+                return fetchOpenAICompat(messages, systemInstruction, `google/${model}`);
+            }
+            return null;
         }
 
         const data = await response.json();
@@ -258,56 +264,73 @@ export const analyzeStage = async (questions: Question[], answers: {qId: string,
   }
 };
 
-export const generateBossQuestion = async (level: number, operators: Operator[]): Promise<{text: string, answer: number} | null> => {
+export const generateBossQuestion = async (level: number, operators: Operator[], stageNum: number): Promise<{text: string, answer: number} | null> => {
     const opString = operators.join(', ');
-    const prompt = `Generate a fun math word problem (Boss Battle) for a 3rd grader.
-    Level context: Numbers up to 1000.
-    Allowed Operations: ${opString}.
-    Language: Chinese (Simplified).
-    Theme: Fantasy RPG (Dragons, Treasure, Magic) or Space.
-    Format: JSON object with "question" (string) and "answer" (number).
-    Example: {"question": "恶龙抓走了公主！你需要3把钥匙才能打开笼子，每把钥匙需要25个魔法石。你现在有10个魔法石，还需要多少个？", "answer": 65}`;
-
-    if (useOpenAIProtocol()) {
-        const text = await fetchOpenAICompat([{ role: 'user', content: prompt }], undefined, "gemini-3-flash-preview");
-        if(text && !text.startsWith('System Error')) {
-             try {
-                // More robust JSON extraction using regex
-                const jsonMatch = text.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                    const result = JSON.parse(jsonMatch[0]);
-                    return { text: result.question, answer: Number(result.answer) };
-                }
-             } catch (e) { 
-                console.error("Boss JSON Parse Error", e, "Text:", text); 
-                return null; 
-             }
-        }
-        return null;
+    
+    // Determine Difficulty Context based on Stage
+    let difficultyContext = "";
+    if (stageNum <= 10) {
+        difficultyContext = "非常简单。数字在20以内。简单的加减法应用题。";
+    } else if (stageNum <= 20) {
+        difficultyContext = "简单。数字在50以内。两步计算的加减法应用题。";
+    } else if (stageNum <= 30) {
+        difficultyContext = "中等难度。引入乘法口诀(2-9)。简单有趣的应用场景。";
+    } else if (stageNum <= 50) {
+        difficultyContext = "困难。包含加减乘除四则运算，数字在100以内。逻辑谜题。";
+    } else {
+        difficultyContext = "史诗级挑战。数字在500-1000以内。复杂的多步应用题逻辑。";
     }
 
-    const ai = initAI();
-    if (!ai) return null;
+    const prompt = `你是一个小学数学老师。请生成一个有趣的Boss战数学应用题。
+    关卡: ${stageNum}
+    难度要求: ${difficultyContext}
+    允许的运算符号: ${opString}.
+    语言: 简体中文。
+    主题: 奇幻冒险(巨龙、宝藏、魔法)或太空探索。
+    
+    输出格式必须是严格的 JSON 对象: {"question": "题目文本", "answer": 答案数字}
+    例子: {"question": "恶龙抓走了公主！你需要3把钥匙才能打开笼子，每把钥匙需要25个魔法石。你现在有10个魔法石，还需要多少个？", "answer": 65}`;
+
+    // --- 本地保底题库 (如果 AI 生成失败，则从这里随机选一个) ---
+    const fallbackQuestions = [
+        { text: "巨龙守护着金币！它左爪抓着 45 枚金币，右爪抓着 38 枚金币。巨龙一共抓着多少枚金币？", answer: 83 },
+        { text: "小魔法师有 100 毫升魔药，配置一瓶隐身药水需要 15 毫升。他配置了 4 瓶后，还剩下多少毫升魔药？", answer: 40 },
+        { text: "太空飞船有 3 个推进器，每个推进器每秒消耗 12 个能量块。如果推进器工作 5 秒，一共消耗多少个能量块？", answer: 180 },
+        { text: "你有 64 颗魔法豆，要平均分给 8 个小精灵。每个小精灵能得到几颗？", answer: 8 },
+        { text: "勇者在森林里发现了 5 棵苹果树，每棵树上结了 12 个红苹果和 8 个绿苹果。请问一共有多少个苹果？", answer: 100 }
+    ];
 
     try {
-        const response = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json"
+        if (useOpenAIProtocol()) {
+            const text = await fetchOpenAICompat([{ role: 'user', content: prompt }], undefined, "gemini-3-flash-preview");
+            if(text) {
+                 const jsonMatch = text.match(/\{[\s\S]*\}/);
+                 if (jsonMatch) {
+                     const result = JSON.parse(jsonMatch[0]);
+                     return { text: result.question, answer: Number(result.answer) };
+                 }
             }
-        });
-        
-        const text = response.text;
-        if(text) {
-             const result = JSON.parse(text);
-             return { text: result.question, answer: Number(result.answer) };
+        } else {
+            const ai = initAI();
+            if (ai) {
+                const response = await ai.models.generateContent({
+                    model: "gemini-3-flash-preview",
+                    contents: prompt,
+                    config: { responseMimeType: "application/json" }
+                });
+                const text = response.text;
+                if(text) {
+                     const result = JSON.parse(text);
+                     return { text: result.question, answer: Number(result.answer) };
+                }
+            }
         }
-        return null;
     } catch (e) {
-        console.error("Boss Gen Error", e);
-        return null;
+        console.error("AI Boss Gen Error, using fallback.", e);
     }
+
+    // 最后的保底：如果所有 API 都失败了，随机返回一个本地题目
+    return fallbackQuestions[Math.floor(Math.random() * fallbackQuestions.length)];
 };
 
 // --- AUTOMATED BACKGROUND GENERATION ---
