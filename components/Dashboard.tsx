@@ -1,8 +1,9 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { UserStats, Operator } from '../types';
 import { BADGES, LEVEL_Thresholds } from '../constants';
-import { Star, TrendingUp, History, Award, Check, Sword, Zap, Clock, Lock, MapPin, Castle, Crown } from 'lucide-react';
+import { Star, TrendingUp, History, Award, Check, Sword, Zap, Clock, Lock, MapPin, Castle, Crown, Palette, Wand2, Loader2, Image as ImageIcon } from 'lucide-react';
 import { getXpProgress } from '../services/mathEngine';
+import { getZoneBackground } from '../services/geminiService';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar 
@@ -20,6 +21,12 @@ interface Props {
 const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator, onStartStage, onReview, onBossChallenge }) => {
   const [activeTab, setActiveTab] = useState<'map' | 'badges' | 'stats'>('map');
   const scrollRef = useRef<HTMLDivElement>(null);
+  
+  // Background Generation State
+  const [bgImage, setBgImage] = useState<string | null>(null);
+  const [bgLoading, setBgLoading] = useState(false);
+
+  const currentZone = Math.ceil(stats.currentStage / 10);
 
   const nextLevelXp = LEVEL_Thresholds[stats.level] || 10000;
   const progress = getXpProgress(stats.xp, stats.level, LEVEL_Thresholds);
@@ -28,18 +35,26 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
     return BADGES.filter(b => stats.badges.includes(b.id));
   }, [stats.badges]);
 
+  // Load Background Automatically
+  useEffect(() => {
+    const loadBg = async () => {
+        setBgLoading(true);
+        // Attempt to load background silently. If API key exists, it generates. If not, it fails silently.
+        const img = await getZoneBackground(currentZone);
+        if (img) setBgImage(img);
+        setBgLoading(false);
+    };
+    loadBg();
+  }, [currentZone]);
+
   // Scroll to current stage on mount (Vertical Map)
   useEffect(() => {
     if (activeTab === 'map' && scrollRef.current) {
-        // Delay slightly to ensure layout is computed
         setTimeout(() => {
             if (!scrollRef.current) return;
-            // Calculate offset: Stage * Height per stage (90px)
             const stageHeight = 90; 
             const containerHeight = scrollRef.current.clientHeight;
-            // We want to center the current stage.
             const targetScroll = (stats.currentStage * stageHeight) - (containerHeight / 2);
-            
             scrollRef.current.scrollTo({ top: Math.max(0, targetScroll), behavior: 'smooth' });
         }, 100);
     }
@@ -99,35 +114,12 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
 
   // Helper for map path calculation
   const getMapPosition = (index: number) => {
-      // Create a sine wave path
-      // Index 1 is at top. 
       const y = index * 90; // 90px vertical spacing
-      // x oscillates between 20% and 80%
-      // We use Math.sin to create the wave.
-      // Adjust frequency (0.8) to control curve tightness
       const xOffset = Math.sin(index * 0.8) * 35; // 35% swing from center
       const x = 50 + xOffset; // Center at 50%
       return { x: `${x}%`, y };
   };
 
-  // Helper for zone themes
-  const getZoneTheme = (stageNum: number) => {
-      const zone = Math.ceil(stageNum / 10);
-      const themes = [
-          'bg-green-100 border-green-200', // Grass
-          'bg-yellow-100 border-yellow-200', // Desert
-          'bg-blue-100 border-blue-200', // Ice
-          'bg-orange-100 border-orange-200', // Volcano
-          'bg-purple-100 border-purple-200', // Magic
-          'bg-teal-100 border-teal-200', // Ocean
-          'bg-stone-100 border-stone-200', // Cave
-          'bg-sky-100 border-sky-200', // Sky
-          'bg-pink-100 border-pink-200', // Candy
-          'bg-slate-800 border-slate-700 text-white', // Space
-      ];
-      return themes[(zone - 1) % themes.length];
-  };
-  
   const getZoneIcon = (stageNum: number) => {
       const zone = Math.ceil(stageNum / 10);
       const icons = ['🌲', '🌵', '❄️', '🌋', '🔮', '🐙', '🦇', '☁️', '🍭', '🚀'];
@@ -135,11 +127,8 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
   };
 
   const renderVerticalMap = () => {
-    // Generate 100 stages
     const totalStages = 100;
     const stages = Array.from({ length: totalStages }, (_, i) => i + 1);
-    
-    // Explicitly calculate height so scrolling works correctly
     const totalHeight = totalStages * 90 + 150; 
 
     return (
@@ -148,16 +137,12 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
             style={{ height: `${totalHeight}px` }}
         >
             {/* Draw Path Lines First */}
-            <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0">
+            <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0 filter drop-shadow-md">
                 {stages.map((stageNum) => {
                     if (stageNum >= totalStages) return null;
                     const curr = getMapPosition(stageNum);
                     const next = getMapPosition(stageNum + 1);
-                    // Add 40px to Y to account for button height/center roughly
                     const yOffset = 40; 
-                    
-                    // Logic to color the path: if stageNum < stats.currentStage, it's completed (solid colored)
-                    // If stageNum === stats.currentStage, it's next (dashed)
                     const isCompletedPath = stageNum < stats.currentStage;
                     
                     return (
@@ -167,7 +152,7 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
                             y1={curr.y + yOffset} 
                             x2={next.x} 
                             y2={next.y + yOffset} 
-                            stroke={isCompletedPath ? "#3B82F6" : "#E5E7EB"} 
+                            stroke={isCompletedPath ? "white" : "rgba(255,255,255,0.4)"} 
                             strokeWidth="8" 
                             strokeDasharray={isCompletedPath ? "0" : "12 8"}
                             strokeLinecap="round"
@@ -182,16 +167,13 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
                 const isLocked = stageNum > stats.currentStage;
                 const stars = stats.stageStars[stageNum] || 0;
                 const isBoss = stageNum % 5 === 0;
-                const themeClass = getZoneTheme(stageNum);
-
-                // Start of a new Zone marker
                 const isZoneStart = (stageNum - 1) % 10 === 0;
 
                 return (
                     <React.Fragment key={stageNum}>
                         {isZoneStart && (
                              <div 
-                                className="absolute text-xs font-bold text-gray-400 bg-white/80 px-3 py-1 rounded-full border border-gray-200 backdrop-blur-sm shadow-sm z-0"
+                                className="absolute text-xs font-bold text-gray-500 bg-white/90 px-3 py-1 rounded-full border border-gray-200 backdrop-blur-sm shadow-sm z-0"
                                 style={{ 
                                     top: pos.y - 40, 
                                     left: '50%', 
@@ -219,7 +201,7 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
                                         : 'w-16 h-16 rounded-full border-b-4 hover:scale-110'
                                     }
                                     ${isLocked 
-                                        ? 'bg-gray-200 border-gray-300 text-gray-400' 
+                                        ? 'bg-gray-200/80 backdrop-blur-sm border-gray-300 text-gray-400' 
                                         : isBoss
                                             ? 'bg-yellow-400 border-yellow-600 text-yellow-900 shadow-yellow-200'
                                             : stageNum === stats.currentStage 
@@ -263,8 +245,15 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
   return (
     <div className="w-full max-w-4xl mx-auto p-4 space-y-6">
       {/* Header Profile */}
-      <div className="bg-white rounded-3xl p-6 shadow-xl border-b-4 border-blue-100 flex flex-col md:flex-row items-center justify-between gap-6">
-        <div className="flex items-center gap-4">
+      <div className="bg-white rounded-3xl p-6 shadow-xl border-b-4 border-blue-100 flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
+        {/* Background Image Effect for Header */}
+        {bgImage && (
+            <div className="absolute inset-0 z-0 opacity-10">
+                <img src={bgImage} className="w-full h-full object-cover" alt="header bg" />
+            </div>
+        )}
+        
+        <div className="flex items-center gap-4 relative z-10">
           <div className="w-20 h-20 bg-yellow-300 rounded-full flex items-center justify-center text-4xl shadow-inner border-4 border-white">
             🦁
           </div>
@@ -278,7 +267,7 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
         </div>
         
         {/* XP Bar */}
-        <div className="flex-1 w-full md:w-auto">
+        <div className="flex-1 w-full md:w-auto relative z-10">
           <div className="flex justify-between text-sm font-bold text-gray-600 mb-1">
             <span>XP: {stats.xp}</span>
             <span>目标: {nextLevelXp}</span>
@@ -304,7 +293,7 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
             onClick={() => setActiveTab('badges')}
             className={`flex-1 py-3 rounded-2xl font-bold font-cartoon transition-all ${activeTab === 'badges' ? 'bg-yellow-500 text-white shadow-lg transform -translate-y-1' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
           >
-            荣誉勋章 ({unlockedBadges.length})
+            荣誉勋章
           </button>
           <button 
             onClick={() => setActiveTab('stats')}
@@ -316,12 +305,12 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
 
       {/* Map Tab Content */}
       {activeTab === 'map' && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-pop">
              {/* Config Panel */}
              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-white p-4 rounded-2xl shadow-md border border-gray-100">
                     <h3 className="text-sm font-bold text-gray-500 mb-3 flex items-center gap-2">
-                    🛠️ 训练项目 (影响新关卡题目)
+                    🛠️ 训练项目
                     </h3>
                     <div className="flex gap-2">
                         {renderOperatorBtn(Operator.ADD, '加法', 'bg-blue-500')}
@@ -350,12 +339,33 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
                 </div>
             </div>
 
-             {/* Vertical Map Scroller */}
-             <div 
-                ref={scrollRef}
-                className="bg-white rounded-3xl shadow-xl border-4 border-blue-100 overflow-y-auto h-[600px] relative scroll-smooth custom-scrollbar bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-fixed"
-             >
-                 {renderVerticalMap()}
+             {/* Vertical Map Scroller with Dynamic Background */}
+             <div className="relative rounded-3xl shadow-xl overflow-hidden border-4 border-blue-200 bg-blue-50">
+                {/* AI Background Layer */}
+                <div className="absolute inset-0 z-0">
+                    {bgImage ? (
+                        <div className="w-full h-full relative">
+                            <img src={bgImage} className="w-full h-full object-cover opacity-80" alt="map background" />
+                            <div className="absolute inset-0 bg-gradient-to-b from-white/30 to-blue-900/10"></div>
+                        </div>
+                    ) : (
+                        <div className="w-full h-full bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-fixed opacity-50"></div>
+                    )}
+                </div>
+
+                {/* Loading Indicator */}
+                {bgLoading && (
+                    <div className="absolute top-4 right-4 z-20 bg-black/50 text-white text-xs px-3 py-1 rounded-full flex items-center gap-2">
+                        <Loader2 size={12} className="animate-spin" /> 正在绘制地图背景...
+                    </div>
+                )}
+
+                <div 
+                    ref={scrollRef}
+                    className="relative z-10 overflow-y-auto h-[600px] scroll-smooth custom-scrollbar"
+                >
+                    {renderVerticalMap()}
+                </div>
              </div>
         </div>
       )}

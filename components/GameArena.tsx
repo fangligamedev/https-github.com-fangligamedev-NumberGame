@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Question, Operator } from '../types';
 import { ArrowRight, CheckCircle, XCircle, Sword, Mic, MicOff, AlertTriangle, Volume2, Shield } from 'lucide-react';
-import { generateSpeech } from '../services/geminiService';
+import { generateSpeech, getZoneBackground } from '../services/geminiService';
 
 interface Props {
   question: Question;
@@ -30,14 +30,31 @@ const GameArena: React.FC<Props> = ({
   const [isListening, setIsListening] = useState(false);
   const [showBossIntro, setShowBossIntro] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [bgImage, setBgImage] = useState<string | null>(null);
   
   const inputRef = useRef<HTMLInputElement>(null);
+  // Ref to keep track of input value inside closure-bound event handlers
+  const inputValueRef = useRef(''); 
   const recognitionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const correctAudioBufferRef = useRef<AudioBuffer | null>(null);
   
   // Timing refs
   const startTimeRef = useRef(Date.now());
+
+  // Update ref when state changes
+  useEffect(() => {
+      inputValueRef.current = inputValue;
+  }, [inputValue]);
+
+  // Load Background
+  useEffect(() => {
+     const loadBg = async () => {
+         const img = await getZoneBackground(1); 
+         if (img) setBgImage(img);
+     };
+     loadBg();
+  }, []);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -49,10 +66,7 @@ const GameArena: React.FC<Props> = ({
     // Boss Intro Logic
     if (question.isBoss) {
         setShowBossIntro(true);
-        // Play AI Voice
         handleBossVoiceOver();
-        
-        // Hide visual overlay after animation
         const timer = setTimeout(() => {
             setShowBossIntro(false);
             inputRef.current?.focus();
@@ -95,12 +109,10 @@ const GameArena: React.FC<Props> = ({
 
   const playFeedbackVoice = async (text: string, isCorrect: boolean) => {
       try {
-          // Cache logic for "Correct" message to save API calls and latency
           if (isCorrect && correctAudioBufferRef.current) {
               playBuffer(correctAudioBufferRef.current);
               return;
           }
-
           const buffer = await generateSpeech(text);
           if (buffer) {
               if (isCorrect) {
@@ -115,15 +127,12 @@ const GameArena: React.FC<Props> = ({
 
   const handleBossVoiceOver = async () => {
       if (!question.bossText) return;
-      
       try {
           setIsPlayingAudio(true);
           const buffer = await generateSpeech("警报！遭遇首领挑战！" + question.bossText);
-          
           if (buffer) {
               const ctx = getAudioContext();
               if (ctx.state === 'suspended') await ctx.resume();
-              
               const source = ctx.createBufferSource();
               source.buffer = buffer;
               source.connect(ctx.destination);
@@ -133,17 +142,15 @@ const GameArena: React.FC<Props> = ({
               setIsPlayingAudio(false);
           }
       } catch (e) {
-          console.error("Audio playback failed", e);
           setIsPlayingAudio(false);
       }
   };
 
   const handleSubmit = (e?: React.FormEvent, overrideValue?: string) => {
     e?.preventDefault();
-    if (status !== 'idle') return; // Prevent double submission
+    if (status !== 'idle') return; 
 
-    const valToSubmit = overrideValue !== undefined ? overrideValue : inputValue;
-    
+    const valToSubmit = overrideValue !== undefined ? overrideValue : inputValueRef.current; // Use ref for latest value
     if (!valToSubmit) return;
 
     const timeTaken = Date.now() - startTimeRef.current;
@@ -165,7 +172,7 @@ const GameArena: React.FC<Props> = ({
       playFeedbackVoice(msg, false);
       setTimeout(() => {
         onAnswer(false, numVal, timeTaken);
-      }, 2500); // Give more time to read boss answer
+      }, 2500); 
     }
   };
 
@@ -177,7 +184,7 @@ const GameArena: React.FC<Props> = ({
     }
 
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      alert('您的浏览器不支持语音控制');
+      alert('您的浏览器不支持语音控制，请使用 Chrome。');
       return;
     }
 
@@ -186,14 +193,17 @@ const GameArena: React.FC<Props> = ({
     const recognition = new SpeechRecognition();
     recognition.lang = 'zh-CN';
     recognition.continuous = true;
-    recognition.interimResults = false;
+    recognition.interimResults = true; // Enable interim results for responsiveness
 
     recognition.onstart = () => setIsListening(true);
     recognition.onend = () => setIsListening(false);
     
     recognition.onresult = (event: any) => {
-      const last = event.results.length - 1;
-      const transcript = event.results[last][0].transcript;
+      let transcript = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+          transcript += event.results[i][0].transcript;
+      }
+      
       console.log('Voice Input:', transcript);
 
       // 1. Extract Numbers
@@ -202,30 +212,27 @@ const GameArena: React.FC<Props> = ({
       let detectedNumber = digitMatch ? digitMatch[0] : null;
 
       // 2. Handle Commands
-      const isSubmit = transcript.includes('提交') || transcript.includes('确定') || transcript.includes('下一题') || transcript.includes('对');
+      const isSubmit = transcript.includes('提交') || transcript.includes('确定') || transcript.includes('下一题') || transcript.includes('对') || transcript.includes('好');
       const isExit = transcript.includes('退出') || transcript.includes('不玩了');
       const isClear = transcript.includes('清除') || transcript.includes('重来');
 
-      if (isExit) {
-        onExit();
-        return;
-      }
-
-      if (isClear) {
-        setInputValue('');
-        return;
+      if (isExit) { onExit(); return; }
+      if (isClear) { 
+          setInputValue(''); 
+          inputValueRef.current = '';
+          return; 
       }
 
       if (detectedNumber) {
         setInputValue(detectedNumber);
-        // If said number AND submit command (or just "25" might imply submit if we want aggressive auto-submit, but explicit command is safer)
-        // Let's allow "25 Submit" flow
+        // We only auto-submit if there is an explicit submit command OR if the number matches the answer perfectly?
+        // Let's stick to explicit command for safety, or user can press enter.
         if (isSubmit) {
            handleSubmit(undefined, detectedNumber);
         }
-      } else if (isSubmit && inputValue) {
-        // Said "Submit" without a number, but input has value
-        handleSubmit();
+      } else if (isSubmit && inputValueRef.current) {
+         // Using Ref to access the latest input value even if closure is stale
+        handleSubmit(undefined, inputValueRef.current);
       }
     };
 
@@ -244,87 +251,103 @@ const GameArena: React.FC<Props> = ({
   const isBoss = question.isBoss;
 
   return (
-    <div className={`flex flex-col items-center justify-start min-h-[70vh] w-full max-w-2xl mx-auto p-4 pt-8 relative overflow-hidden ${showBossIntro ? 'animate-shake' : ''}`}>
+    <div className={`flex flex-col items-center justify-start min-h-[70vh] w-full max-w-2xl mx-auto pt-8 relative overflow-hidden transition-all duration-500 rounded-3xl ${showBossIntro ? 'animate-shake' : ''}`}>
+      
+      {/* Background Layer */}
+      {bgImage && (
+          <div className="absolute inset-0 z-0">
+              <img src={bgImage} className="w-full h-full object-cover opacity-60 blur-sm" alt="game bg" />
+              <div className="absolute inset-0 bg-white/40"></div>
+          </div>
+      )}
+
+      {/* Correct/Wrong Overlay - Full Screen */}
+      {status !== 'idle' && (
+          <div className={`absolute inset-0 z-40 flex items-center justify-center backdrop-blur-md animate-pop ${status === 'correct' ? 'bg-green-500/30' : 'bg-red-500/30'}`}>
+              <div className="text-center transform scale-150 p-8 bg-white/90 rounded-3xl shadow-2xl">
+                  {status === 'correct' ? (
+                      <CheckCircle className="text-green-500 w-32 h-32 mx-auto mb-4 animate-bounce-small" />
+                  ) : (
+                      <XCircle className="text-red-500 w-32 h-32 mx-auto mb-4 animate-pulse" />
+                  )}
+                  <p className={`text-4xl font-bold font-cartoon ${status === 'correct' ? 'text-green-600' : 'text-red-600'}`}>
+                    {feedbackMsg}
+                  </p>
+              </div>
+          </div>
+      )}
       
       {/* Boss Intro Overlay */}
       {showBossIntro && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-red-900/90 backdrop-blur-sm rounded-3xl animate-pop overflow-hidden">
-           {/* Flash Effect inside Overlay */}
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-red-900/95 backdrop-blur-sm rounded-3xl animate-pop overflow-hidden">
            <div className="absolute inset-0 bg-white opacity-20 animate-ping"></div>
-           
            <div className="text-center text-white relative z-10">
               <AlertTriangle size={80} className="mx-auto mb-4 text-yellow-400 animate-bounce" />
-              <h2 className="text-4xl font-bold font-cartoon mb-2 tracking-wider">BOSS 降临</h2>
-              <p className="text-red-200 animate-pulse text-xl">请听题...</p>
+              <h2 className="text-5xl font-bold font-cartoon mb-4 tracking-wider text-yellow-300 drop-shadow-lg">BOSS 降临</h2>
+              <p className="text-red-200 animate-pulse text-2xl">全神贯注...</p>
            </div>
         </div>
       )}
 
-      {/* Top Bar with Progress */}
-      <div className="w-full mb-6">
+      {/* Top Bar */}
+      <div className="w-full mb-6 relative z-10 px-4">
         <div className="flex justify-between items-center mb-2">
-          <button onClick={onExit} className="text-gray-400 font-bold hover:text-red-500 transition text-sm">
-            退出
+          <button onClick={onExit} className="bg-white/50 hover:bg-white text-gray-700 font-bold px-3 py-1 rounded-full transition text-sm backdrop-blur-sm">
+            ❌ 退出
           </button>
-          <div className="flex items-center gap-2 font-bold text-sm text-gray-500">
+          <div className="flex items-center gap-2 font-bold text-sm text-gray-700 bg-white/50 px-3 py-1 rounded-full backdrop-blur-sm">
              {isReviewMode && <Shield size={16} className="text-purple-500" />}
              {isReviewMode ? "错题特训中" : `关卡进度 ${currentQuestionIndex + 1}/${totalQuestions}`}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 bg-white/80 px-3 py-1 rounded-full shadow-sm">
             <span className="text-orange-500 font-bold text-lg">🔥 {streak}</span>
           </div>
         </div>
-        <div className="w-full bg-gray-200 h-3 rounded-full overflow-hidden">
+        <div className="w-full bg-gray-200/50 h-3 rounded-full overflow-hidden backdrop-blur-sm border border-white/50">
           <div 
-            className={`h-full transition-all duration-300 ease-out ${isReviewMode ? 'bg-purple-500' : 'bg-blue-500'}`}
+            className={`h-full transition-all duration-300 ease-out shadow-[0_0_10px_rgba(59,130,246,0.5)] ${isReviewMode ? 'bg-purple-500' : 'bg-blue-500'}`}
             style={{ width: `${((currentQuestionIndex) / totalQuestions) * 100}%` }}
           ></div>
         </div>
       </div>
 
-      {/* Encouragement Banner */}
+      {/* Encouragement */}
       {encouragement && status === 'idle' && !isBoss && (
-        <div className="mb-4 animate-pop bg-yellow-100 text-yellow-800 px-4 py-2 rounded-full text-sm font-bold shadow-sm border border-yellow-200">
+        <div className="mb-4 animate-pop bg-yellow-100/90 text-yellow-800 px-6 py-2 rounded-full text-sm font-bold shadow-lg border-2 border-white relative z-10">
           💡 AI 老师: {encouragement}
         </div>
       )}
 
       {/* Boss Header */}
       {isBoss && (
-        <div className="mb-4 animate-bounce-small bg-red-100 text-red-800 px-6 py-2 rounded-full font-cartoon text-xl font-bold shadow-sm border-2 border-red-300 flex items-center gap-2">
+        <div className="mb-4 animate-bounce-small bg-red-600 text-white px-8 py-3 rounded-full font-cartoon text-xl font-bold shadow-lg border-4 border-red-400 flex items-center gap-2 relative z-10">
           <Sword size={24} /> BOSS 挑战关卡
-          {isPlayingAudio && <Volume2 size={20} className="animate-pulse text-red-600" />}
+          {isPlayingAudio && <Volume2 size={20} className="animate-pulse text-red-200" />}
         </div>
       )}
 
-      {/* Question Card */}
-      <div className={`relative bg-white w-full rounded-3xl shadow-2xl p-4 md:p-10 flex flex-col items-center border-b-8 transition-colors duration-300 ${
-          status === 'correct' ? 'border-green-500 bg-green-50' : 
-          status === 'wrong' ? 'border-red-500 bg-red-50' : 
-          isBoss ? 'border-red-500 shadow-red-200 ring-4 ring-red-100 ring-opacity-50' : 
-          isReviewMode ? 'border-purple-500 shadow-purple-200' : // Purple for review mode
-          'border-blue-500'
+      {/* Main Card */}
+      <div className={`relative w-full rounded-3xl shadow-2xl p-4 md:p-10 flex flex-col items-center border-b-8 transition-all duration-300 z-10 backdrop-blur-xl ${
+          isBoss ? 'bg-red-50/90 border-red-500' : 
+          isReviewMode ? 'bg-purple-50/90 border-purple-500' : 
+          'bg-white/90 border-blue-500'
       }`}>
         
-        {/* Render Logic: Boss Text vs Standard Equation */}
         {isBoss ? (
             <div className={`mb-8 text-center transition-opacity duration-1000 ${showBossIntro ? 'opacity-0' : 'opacity-100'}`}>
-                <p className="text-xl md:text-2xl font-bold text-gray-800 leading-relaxed font-cartoon">
+                <p className="text-xl md:text-2xl font-bold text-gray-800 leading-relaxed font-cartoon drop-shadow-sm">
                     {question.bossText}
                 </p>
-                <div className="mt-4 text-sm text-gray-500">
-                    请在下方输入最终答案（数字）
-                </div>
             </div>
         ) : (
-            <div className="flex items-center gap-4 text-5xl md:text-7xl font-bold text-gray-800 mb-8 font-cartoon">
+            <div className="flex items-center gap-4 text-5xl md:text-7xl font-bold text-gray-800 mb-8 font-cartoon drop-shadow-sm">
             <span className="w-24 text-center">{question.num1}</span>
             <span className={`text-${isReviewMode ? 'purple' : 'blue'}-500`}>{getOperatorDisplay(question.operator)}</span>
             <span className="w-24 text-center">{question.num2}</span>
             <span>=</span>
-            <div className="w-32 h-20 bg-gray-100 rounded-xl border-4 border-gray-300 flex items-center justify-center text-gray-800 overflow-hidden relative">
+            <div className="w-32 h-20 bg-gray-100/50 rounded-xl border-4 border-gray-300 flex items-center justify-center text-gray-800 overflow-hidden relative shadow-inner">
                 {status === 'idle' ? (
-                    <span className="animate-pulse text-gray-300">?</span>
+                    <span className="animate-pulse text-gray-400">?</span>
                 ) : (
                     <span className={status === 'correct' ? 'text-green-600' : 'text-red-600'}>{inputValue}</span>
                 )}
@@ -341,7 +364,7 @@ const GameArena: React.FC<Props> = ({
               inputMode="numeric"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              className={`flex-1 min-w-0 bg-gray-50 border-2 rounded-xl px-4 py-3 text-3xl text-center font-bold focus:outline-none focus:ring-4 transition-all ${
+              className={`flex-1 min-w-0 bg-white/80 border-2 rounded-xl px-4 py-3 text-3xl text-center font-bold focus:outline-none focus:ring-4 transition-all shadow-inner ${
                   isBoss ? 'border-red-200 focus:border-red-500 focus:ring-red-100' : 
                   isReviewMode ? 'border-purple-200 focus:border-purple-500 focus:ring-purple-100' :
                   'border-gray-200 focus:border-blue-500 focus:ring-blue-100'
@@ -352,8 +375,7 @@ const GameArena: React.FC<Props> = ({
              <button 
                 type="button"
                 onClick={toggleVoiceControl}
-                className={`flex-shrink-0 rounded-xl px-4 transition-all border-b-4 active:border-b-0 active:translate-y-1 ${isListening ? 'bg-red-500 border-red-700 text-white animate-pulse' : 'bg-gray-200 border-gray-300 text-gray-500 hover:bg-gray-300'}`}
-                title={isListening ? "停止语音" : "开启语音控制: 说出答案并说'提交'"}
+                className={`flex-shrink-0 rounded-xl px-4 transition-all border-b-4 active:border-b-0 active:translate-y-1 shadow-md ${isListening ? 'bg-red-500 border-red-700 text-white animate-pulse' : 'bg-gray-100 border-gray-300 text-gray-500 hover:bg-gray-200'}`}
              >
                 {isListening ? <MicOff size={24} /> : <Mic size={24} />}
              </button>
@@ -370,26 +392,11 @@ const GameArena: React.FC<Props> = ({
              </button>
           </form>
         )}
-
-        {/* Feedback Display */}
-        {status !== 'idle' && (
-          <div className={`flex flex-col items-center animate-pop`}>
-            {status === 'correct' ? (
-                <CheckCircle className="text-green-500 mb-2 w-16 h-16" />
-            ) : (
-                <XCircle className="text-red-500 mb-2 w-16 h-16" />
-            )}
-            <p className={`text-2xl font-bold ${status === 'correct' ? 'text-green-600' : 'text-red-600'}`}>
-                {feedbackMsg}
-            </p>
-          </div>
-        )}
-
       </div>
       
-      <div className="mt-8 text-gray-400 text-sm flex flex-col items-center gap-1">
+      <div className="mt-8 text-gray-500 text-sm flex flex-col items-center gap-1 bg-white/60 px-4 py-2 rounded-full backdrop-blur-sm shadow-sm relative z-10">
          <span>按回车键提交答案</span>
-         {isListening && <span className="text-red-400 font-bold animate-pulse">🎤 正在听... (试着说: "25 提交")</span>}
+         {isListening && <span className="text-red-500 font-bold animate-pulse">🎤 正在听... (试着说: "25 提交")</span>}
       </div>
     </div>
   );

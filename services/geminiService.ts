@@ -1,9 +1,13 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 import { MistakeRecord, Question, ChatMessage, Operator } from "../types";
 
+// Cache backgrounds to avoid regenerating every time we switch tabs
+const backgroundCache: Record<number, string> = {};
+
 const initAI = () => {
+  // Always create a new instance to pick up the latest key from process.env if it was just set via dialog
   if (!process.env.API_KEY) {
-    console.warn("Gemini API Key missing");
+    // console.warn("Gemini API Key missing"); // Suppress warning to avoid console spam
     return null;
   }
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -40,7 +44,6 @@ async function decodeAudioData(
 }
 // -----------------------------
 
-// ... existing getEncouragement ...
 export const getEncouragement = async (streak: number, level: number): Promise<string> => {
   const ai = initAI();
   if (!ai) return "你做得真棒！继续加油！";
@@ -58,9 +61,7 @@ export const getEncouragement = async (streak: number, level: number): Promise<s
   }
 };
 
-// ... existing analyzeMistakes ...
 export const analyzeMistakes = async (mistakes: MistakeRecord[]): Promise<string> => {
-    // ... keep existing implementation details ...
     const ai = initAI();
     if (!ai) return "分析服务暂时不可用。";
   
@@ -81,7 +82,6 @@ export const analyzeMistakes = async (mistakes: MistakeRecord[]): Promise<string
     }
 };
 
-// New: Chat with the tutor
 export const chatWithTutor = async (history: ChatMessage[], newMessage: string): Promise<string> => {
   const ai = initAI();
   if (!ai) return "我现在有点累，稍后再聊吧。";
@@ -108,7 +108,6 @@ export const chatWithTutor = async (history: ChatMessage[], newMessage: string):
   }
 };
 
-// New: Generate Speech from Text
 export const generateSpeech = async (text: string): Promise<AudioBuffer | null> => {
   const ai = initAI();
   if (!ai) return null;
@@ -145,7 +144,6 @@ export const generateSpeech = async (text: string): Promise<AudioBuffer | null> 
   }
 };
 
-// New: Analyze a completed stage
 export const analyzeStage = async (questions: Question[], answers: {qId: string, correct: boolean, val: number}[]): Promise<string> => {
   const ai = initAI();
   if (!ai) return "本关挑战结束！";
@@ -202,4 +200,95 @@ export const generateBossQuestion = async (level: number, operators: Operator[])
         console.error("Boss Gen Error", e);
         return null;
     }
-}
+};
+
+// --- AUTOMATED BACKGROUND GENERATION ---
+const ZONES = [
+    "Lush Green Forest, bright sunlight, cute animals", // 1
+    "Sunny Desert with pyramids and cactus, cartoon style", // 2
+    "Magical Ice Kingdom, snow and crystals", // 3
+    "Active Volcano area with safe paths, cartoon style", // 4
+    "Mysterious Purple Magic City, floating islands", // 5
+    "Underwater Ocean World, colorful coral and fish", // 6
+    "Crystal Cave with glowing gems", // 7
+    "Sky Kingdom, clouds and rainbows", // 8
+    "Candy Land, sweets and chocolates", // 9
+    "Deep Space with planets and rocket ships" // 10
+];
+
+export const getZoneBackground = async (zoneIndex: number, forceRefresh: boolean = false): Promise<string | null> => {
+    // zoneIndex is 1-based (1 to 10 usually)
+    const cacheKey = zoneIndex;
+    if (!forceRefresh && backgroundCache[cacheKey]) {
+        return backgroundCache[cacheKey];
+    }
+
+    const ai = initAI(); 
+    if (!ai) return null;
+
+    const theme = ZONES[(zoneIndex - 1) % ZONES.length];
+    
+    // UPDATED PROMPT: Strict Flat Vector Art Style
+    const prompt = `Vector art style game background of ${theme}. 
+    Aesthetic: Clean flat vector illustration, vibrant colors, geometric shapes, minimal shading. 
+    Suitable for a children's math educational game map. No text. Aspect Ratio 1:1.`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-image-preview', // High quality for backgrounds
+            contents: {
+                parts: [{ text: prompt }]
+            },
+            config: {
+                imageConfig: {
+                    aspectRatio: "1:1",
+                    imageSize: "1K"
+                },
+            }
+        });
+
+        for (const part of response.candidates?.[0]?.content?.parts || []) {
+            if (part.inlineData) {
+                const base64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                backgroundCache[cacheKey] = base64; // Cache it
+                return base64;
+            }
+        }
+        return null;
+    } catch (e) {
+        console.error("Background Gen Error", e);
+        return null;
+    }
+};
+
+export const generateGameImage = async (prompt: string, size: '1K' | '2K' | '4K'): Promise<string | null> => {
+    const ai = initAI();
+    if (!ai) return null;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-image-preview',
+            contents: {
+                parts: [{ text: prompt }]
+            },
+            config: {
+                imageConfig: {
+                    aspectRatio: "1:1",
+                    imageSize: size
+                },
+            }
+        });
+
+        for (const part of response.candidates?.[0]?.content?.parts || []) {
+            if (part.inlineData) {
+                const base64EncodeString: string = part.inlineData.data;
+                const imageUrl = `data:${part.inlineData.mimeType};base64,${base64EncodeString}`;
+                return imageUrl;
+            }
+        }
+        return null;
+    } catch (e) {
+        console.error("Image Gen Error", e);
+        throw e;
+    }
+};

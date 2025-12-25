@@ -107,8 +107,8 @@ const ChatAssistant: React.FC = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognition.lang = 'zh-CN';
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.continuous = false; 
+    recognition.interimResults = true; // Enabled interim results for immediate feedback
 
     recognition.onstart = () => {
         setIsListening(true);
@@ -120,7 +120,10 @@ const ChatAssistant: React.FC = () => {
         setIsListening(false);
     };
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
+      let transcript = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+          transcript += event.results[i][0].transcript;
+      }
       setInput(transcript);
     };
 
