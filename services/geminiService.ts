@@ -31,11 +31,11 @@ async function fetchOpenAICompat(
     if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_API_BASE_URL) return null;
 
     try {
-        const payloadMessages = [];
+        const payloadMessages = [...messages];
         if (systemInstruction) {
-            payloadMessages.push({ role: 'system', content: systemInstruction });
+            // Prepend system instruction as Zeabur/OpenAI compatible 'system' message
+            payloadMessages.unshift({ role: 'system', content: systemInstruction });
         }
-        payloadMessages.push(...messages);
 
         // Adjust endpoint: ensure it ends with /chat/completions or whatever the proxy expects
         // Zeabur usually provides a base URL like https://api.zeabur.com/gemini/v1
@@ -58,8 +58,9 @@ async function fetchOpenAICompat(
         });
 
         if (!response.ok) {
-            console.error("Zeabur/OpenAI Fetch Error:", response.status, await response.text());
-            return null;
+            const errText = await response.text();
+            console.error("Zeabur/OpenAI Fetch Error:", response.status, errText);
+            return `System Error (${response.status}): ${errText.substring(0, 100)}`;
         }
 
         const data = await response.json();
@@ -166,7 +167,7 @@ export const chatWithTutor = async (history: ChatMessage[], newMessage: string):
       messages.push({ role: 'user', content: newMessage });
       
       const text = await fetchOpenAICompat(messages, systemInstruction);
-      return text || "我没听清，能再说一遍吗？";
+      return text || "API未返回任何内容，请检查配置。";
   }
 
   const ai = initAI();
@@ -269,13 +270,18 @@ export const generateBossQuestion = async (level: number, operators: Operator[])
 
     if (useOpenAIProtocol()) {
         const text = await fetchOpenAICompat([{ role: 'user', content: prompt }], undefined, "gemini-3-flash-preview");
-        if(text) {
+        if(text && !text.startsWith('System Error')) {
              try {
-                // Try to find JSON in text if md block exists
-                const cleanText = text.replace(/```json/g, '').replace(/```/g, '');
-                const result = JSON.parse(cleanText);
-                return { text: result.question, answer: Number(result.answer) };
-             } catch (e) { return null; }
+                // More robust JSON extraction using regex
+                const jsonMatch = text.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    const result = JSON.parse(jsonMatch[0]);
+                    return { text: result.question, answer: Number(result.answer) };
+                }
+             } catch (e) { 
+                console.error("Boss JSON Parse Error", e, "Text:", text); 
+                return null; 
+             }
         }
         return null;
     }
