@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { UserStats, Operator } from '../types';
-import { BADGES, LEVEL_Thresholds } from '../constants';
-import { Star, TrendingUp, History, Award, Check, Sword, Zap, Lock, MapPin, Castle, Crown, Clock } from 'lucide-react';
+import { BADGES, LEVEL_Thresholds, REWARDS } from '../constants';
+import { Star, TrendingUp, History, Award, Check, Sword, Zap, Lock, MapPin, Castle, Crown, Clock, RotateCcw, Gift, ShoppingBag } from 'lucide-react';
 import { getXpProgress } from '../services/mathEngine';
 import { 
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer,
@@ -15,9 +15,11 @@ interface Props {
   onStartStage: (stageNum: number) => void;
   onReview: () => void;
   onBossChallenge: () => void;
+  onResetData: () => void;
+  onRedeemReward: (reward: any) => void; // New
 }
 
-const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator, onStartStage, onReview, onBossChallenge }) => {
+const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator, onStartStage, onReview, onBossChallenge, onResetData, onRedeemReward }) => {
   const [activeTab, setActiveTab] = useState<'map' | 'badges' | 'stats'>('map');
   const scrollRef = useRef<HTMLDivElement>(null);
   
@@ -223,7 +225,10 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
                     <div className="px-2 py-0.5 bg-blue-100 text-blue-600 rounded text-xs font-bold">
                         Lv.{stats.level}
                     </div>
-                    <div className="text-xs text-gray-400">星星: {Object.values(stats.stageStars).reduce((a, b) => a + b, 0)} ⭐</div>
+                    <div className="text-xs text-gray-400">星星: {Object.values(stats.stageStars).reduce((a: any, b: any) => a + b, 0)} ⭐</div>
+                    <div className="text-xs font-bold text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded-full flex items-center gap-1 border border-yellow-100">
+                        <Gift size={10} /> 积分: {stats.points || 0}
+                    </div>
                 </div>
                 <div className="mt-2 h-3 bg-gray-100 rounded-full overflow-hidden relative">
                     <div className="absolute top-0 left-0 h-full bg-green-500 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
@@ -388,24 +393,89 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
                             );
                         })}
                     </div>
+
+                    {/* Reset Data Button */}
+                    <div className="pt-8 flex justify-center">
+                        <button 
+                            onClick={onResetData}
+                            className="text-red-400 text-sm flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-red-50 transition-colors border border-transparent hover:border-red-100"
+                        >
+                            <RotateCcw size={14} /> 重置所有游戏数据
+                        </button>
+                    </div>
                 </div>
             )}
 
             {activeTab === 'badges' && (
-                <div className="p-4 grid grid-cols-2 gap-4">
-                    {BADGES.map(badge => {
-                        const isUnlocked = stats.badges.includes(badge.id);
-                        return (
-                            <div key={badge.id} className={`p-4 rounded-3xl border-b-4 flex flex-col items-center text-center gap-3 relative overflow-hidden transition-all ${isUnlocked ? 'bg-white border-yellow-200 shadow-sm' : 'bg-gray-100 border-gray-200 opacity-60 grayscale'}`}>
-                                <div className="text-5xl drop-shadow-sm">{badge.icon}</div>
-                                <div>
-                                    <div className="font-bold text-gray-800">{badge.name}</div>
-                                    <div className="text-xs text-gray-500 mt-1">{badge.description}</div>
-                                </div>
-                                {!isUnlocked && <Lock size={20} className="absolute top-3 right-3 text-gray-400" />}
+                <div className="p-4 pb-20 space-y-8">
+                    {/* Points Wallet */}
+                    <div className="bg-gradient-to-br from-yellow-400 to-orange-500 p-6 rounded-3xl shadow-lg text-white relative overflow-hidden">
+                        <div className="relative z-10">
+                            <div className="text-sm font-bold opacity-80 mb-1">我的积分账户</div>
+                            <div className="flex items-baseline gap-2">
+                                <span className="text-5xl font-black">{stats.points || 0}</span>
+                                <span className="text-xl font-bold">分</span>
                             </div>
-                        )
-                    })}
+                            <p className="text-xs mt-2 opacity-90">答对题目和击败BOSS可以获得积分哦！</p>
+                        </div>
+                        <Gift size={120} className="absolute -right-8 -bottom-8 opacity-20 rotate-12 z-0" />
+                    </div>
+
+                    {/* Honor Badges */}
+                    <div>
+                        <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2 text-lg">
+                            <Award size={20} className="text-blue-500" /> 荣誉徽章
+                        </h3>
+                        <div className="grid grid-cols-2 gap-4">
+                            {BADGES.filter(b => b.unlocked || stats.badges.includes(b.id) || b.id.includes('level_')).slice(0, 8).map(badge => {
+                                const isUnlocked = stats.badges.includes(badge.id);
+                                return (
+                                    <div key={badge.id} className={`p-4 rounded-3xl border-b-4 flex flex-col items-center text-center gap-3 relative overflow-hidden transition-all ${isUnlocked ? 'bg-white border-yellow-200 shadow-sm' : 'bg-gray-100 border-gray-200 opacity-60 grayscale'}`}>
+                                        <div className="text-5xl drop-shadow-sm">{badge.icon}</div>
+                                        <div>
+                                            <div className="font-bold text-gray-800 text-sm">{badge.name}</div>
+                                            <div className="text-[10px] text-gray-500 mt-1">{badge.description}</div>
+                                        </div>
+                                        {!isUnlocked && <Lock size={16} className="absolute top-3 right-3 text-gray-400" />}
+                                    </div>
+                                )
+                            })}
+                        </div>
+                        <div className="text-center mt-4">
+                            <button className="text-blue-500 text-sm font-bold">查看全部徽章 ({stats.badges.length}/{BADGES.length})</button>
+                        </div>
+                    </div>
+
+                    {/* Reward Shop */}
+                    <div>
+                        <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2 text-lg">
+                            <ShoppingBag size={20} className="text-pink-500" /> 积分商城
+                        </h3>
+                        <div className="grid grid-cols-1 gap-3">
+                            {REWARDS.map(reward => (
+                                <button 
+                                    key={reward.id}
+                                    onClick={() => onRedeemReward(reward)}
+                                    className="bg-white p-4 rounded-3xl shadow-sm border border-pink-100 flex items-center justify-between group active:scale-95 transition-all hover:shadow-md"
+                                >
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-14 h-14 bg-pink-50 rounded-2xl flex items-center justify-center text-3xl group-hover:scale-110 transition-transform">
+                                            {reward.icon}
+                                        </div>
+                                        <div className="text-left">
+                                            <div className="font-bold text-gray-800">{reward.name}</div>
+                                            <div className="text-xs text-pink-500 font-bold flex items-center gap-1 mt-1">
+                                                <Zap size={12} className="fill-pink-500" /> 消耗 {reward.cost} 积分
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className={`px-5 py-2 rounded-2xl font-bold text-sm transition-colors ${stats.points >= reward.cost ? 'bg-pink-500 text-white shadow-pink-200 shadow-lg' : 'bg-gray-100 text-gray-400'}`}>
+                                        {stats.points >= reward.cost ? '立即兑换' : '积分不足'}
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

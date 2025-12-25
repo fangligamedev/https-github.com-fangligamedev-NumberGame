@@ -96,3 +96,13 @@ for (let i = 1; i <= 20; i++) {
 }
 
 export const BADGES = badges;
+
+// --- Rewards System ---
+export const REWARDS: any[] = [
+    { id: 'toy_1', name: '一个新玩具', cost: 100, icon: '🧸', type: 'toy' },
+    { id: 'snack_1', name: '美味冰淇淋', cost: 50, icon: '🍦', type: 'snack' },
+    { id: 'time_1', name: '玩手机 30分钟', cost: 80, icon: '🎮', type: 'time' },
+    { id: 'time_2', name: '看电视 1小时', cost: 120, icon: '📺', type: 'time' },
+    { id: 'snack_2', name: '一顿大餐', cost: 300, icon: '🍕', type: 'snack' },
+    { id: 'custom_1', name: '实现一个愿望', cost: 1000, icon: '🧞', type: 'custom' },
+];

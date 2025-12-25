@@ -6,7 +6,7 @@ import MistakeReview from './components/MistakeReview';
 import StageSummary from './components/StageSummary';
 import ChatAssistant from './components/ChatAssistant';
 import { UserStats, Question, Operator, GameSettings, MistakeRecord } from './types';
-import { generateQuestion, calculateNextReview } from './services/mathEngine';
+import { generateQuestion, calculateNextReview, getStageConfig } from './services/mathEngine';
 import { BADGES, LEVEL_Thresholds } from './constants';
 import { getEncouragement, generateBossQuestion } from './services/geminiService';
 
@@ -14,6 +14,8 @@ import { getEncouragement, generateBossQuestion } from './services/geminiService
 const INITIAL_STATS: UserStats = {
   level: 1,
   xp: 0,
+  points: 0,
+  rewardsRedeemed: [],
   currentStage: 1,
   stageStars: {},
   totalQuestions: 0,
@@ -37,6 +39,8 @@ const App: React.FC = () => {
   const [view, setView] = useState<'dashboard' | 'game' | 'review' | 'stage_summary'>('dashboard');
   const [stats, setStats] = useState<UserStats>(INITIAL_STATS);
   const [loading, setLoading] = useState(false);
+  // View State for Rewards
+  const [showRewards, setShowRewards] = useState(false); // Can be a modal or overlay
   
   // Selection State - Enabled all by default per user request
   const [selectedOperators, setSelectedOperators] = useState<Operator[]>([
@@ -63,6 +67,8 @@ const App: React.FC = () => {
       if (!parsed.stageStars) parsed.stageStars = {};
       if (!parsed.currentStage) parsed.currentStage = 1;
       if (parsed.bossesDefeated === undefined) parsed.bossesDefeated = 0;
+      if (parsed.points === undefined) parsed.points = 0;
+      if (!parsed.rewardsRedeemed) parsed.rewardsRedeemed = [];
       setStats(parsed);
     }
   }, []);
@@ -84,17 +90,13 @@ const App: React.FC = () => {
     });
   };
 
-  const getGameSettings = (level: number, stageNum: number): GameSettings => {
-    // Difficulty scales with Stage Number primarily, refined by user Level
-    const base = { questionsPerStage: 10 };
-    
-    // Simple scaling logic
-    let maxNum = 20;
-    if (stageNum > 50) maxNum = 1000;
-    else if (stageNum > 20) maxNum = 100;
-    else if (stageNum > 10) maxNum = 50;
-
-    return { ...base, maxNumber: maxNum, allowNegative: false, operators: [] };
+  const handleResetData = () => {
+      if (window.confirm("确定要重置所有游戏进度吗？这无法撤销哦！")) {
+          localStorage.removeItem('mathQuestStats_v3');
+          setStats(INITIAL_STATS);
+          setView('dashboard');
+          window.location.reload(); // Reload to clear any memory states/caches
+      }
   };
 
   const checkBadges = (currentStats: UserStats): string[] => {
@@ -154,17 +156,18 @@ const App: React.FC = () => {
     setStageAnswers([]);
     setCurrentQIndex(0);
 
-    const settings = getGameSettings(stats.level, stageNum);
+    // GET CONFIG FROM MATH ENGINE
+    const stageConfig = getStageConfig(stageNum);
     const questions: Question[] = [];
 
-    // Use selected operators
-    const operatorsToUse = selectedOperators;
-
     // Generate normal questions
-    for (let i = 0; i < settings.questionsPerStage; i++) {
-       // Allow mistakes to appear in first 4 slots if available
-       const useMistakes = i < 4; 
-       questions.push(generateQuestion(settings.maxNumber, operatorsToUse, useMistakes ? stats.mistakes : []));
+    // Default 10 questions per stage
+    const questionCount = 10; 
+
+    for (let i = 0; i < questionCount; i++) {
+       // Allow mistakes to appear in first 3 slots if available (Spaced Repetition)
+       const useMistakes = i < 3; 
+       questions.push(generateQuestion(stageConfig, undefined, useMistakes ? stats.mistakes : []));
     }
 
     // Determine if Boss Question should appear
@@ -172,7 +175,8 @@ const App: React.FC = () => {
     const isBossStage = stageNum % 5 === 0;
 
     if (isBossStage) {
-        const bossQ = await generateBossQuestion(stats.level, operatorsToUse);
+        // Pass stageNum for difficulty scaling
+        const bossQ = await generateBossQuestion(stats.level, stageConfig.operators, stageNum);
         if (bossQ) {
             questions[questions.length - 1] = {
                 id: 'boss_' + Date.now(),
@@ -189,14 +193,16 @@ const App: React.FC = () => {
   };
 
   const startBossChallenge = async () => {
-    // Immediate Boss Fight (Extra Practice)
-    setPlayingStageNumber(stats.currentStage); // Just assume current stage context
+    // Immediate Boss Fight (Extra Practice) - Use current stage context
+    const currentStageConfig = getStageConfig(stats.currentStage);
+    
+    setPlayingStageNumber(stats.currentStage); 
     setLoading(true);
     setEncouragement(null);
     setStageAnswers([]);
     setCurrentQIndex(0);
 
-    const bossQ = await generateBossQuestion(stats.level, selectedOperators);
+    const bossQ = await generateBossQuestion(stats.level, currentStageConfig.operators, stats.currentStage);
     if (bossQ) {
         const q: Question = {
             id: 'boss_' + Date.now(),
@@ -236,6 +242,9 @@ const App: React.FC = () => {
       // Boss Bonus
       const finalXpGain = (correct && currentQuestion.isBoss) ? xpGain + 50 : xpGain;
       const newXp = prev.xp + finalXpGain;
+      // Points Logic (1 Point per correct answer, 5 for Boss)
+      const pointsGain = correct ? (currentQuestion.isBoss ? 5 : 1) : 0;
+      const newPoints = (prev.points || 0) + pointsGain;
       
       const newBossesDefeated = (correct && currentQuestion.isBoss) ? prev.bossesDefeated + 1 : prev.bossesDefeated;
 
@@ -301,6 +310,7 @@ const App: React.FC = () => {
         ...prev,
         level: newLevel,
         xp: newXp,
+        points: newPoints,
         totalQuestions: prev.totalQuestions + 1,
         correctAnswers: newCorrect,
         currentStreak: newStreak,
@@ -373,6 +383,21 @@ const App: React.FC = () => {
       setView('stage_summary');
   };
 
+  const handleRedeemReward = (reward: any) => {
+      if (stats.points >= reward.cost) {
+          if(window.confirm(`确定要消耗 ${reward.cost} 积分兑换 "${reward.name}" 吗？`)) {
+              setStats(prev => ({
+                  ...prev,
+                  points: prev.points - reward.cost,
+                  rewardsRedeemed: [...prev.rewardsRedeemed, { ...reward, id: Date.now().toString() }] // Unique ID for each redemption instance
+              }));
+              alert("兑换成功！快去找爸爸妈妈领取奖励吧！🎁");
+          }
+      } else {
+          alert("积分不足，继续加油做题吧！💪");
+      }
+  };
+
   return (
     <div className={`min-h-screen text-gray-800 font-sans relative ${playingStageNumber === -1 ? 'bg-purple-50' : 'bg-[#f0f9ff]'}`}>
       {/* Loading Overlay */}
@@ -408,6 +433,8 @@ const App: React.FC = () => {
             onStartStage={startStage} 
             onReview={() => setView('review')} 
             onBossChallenge={startBossChallenge}
+            onResetData={handleResetData}
+            onRedeemReward={handleRedeemReward}
           />
         )}
 
