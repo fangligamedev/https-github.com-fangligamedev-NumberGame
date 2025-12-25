@@ -51,9 +51,19 @@ export interface OperatorStats {
   totalTimeMs: number;
 }
 
+export interface Reward {
+  id: string;
+  name: string;
+  cost: number;
+  icon: string;
+  type: 'toy' | 'snack' | 'time' | 'custom';
+}
+
 export interface UserStats {
   level: number;
   xp: number;
+  points: number; // New: Points currency
+  rewardsRedeemed: Reward[]; // New: Track redeemed rewards
   currentStage: number; // The highest unlocked stage number (starts at 1)
   stageStars: Record<number, number>; // Map of Stage Number -> Stars Earned (0-3)
   totalQuestions: number;
