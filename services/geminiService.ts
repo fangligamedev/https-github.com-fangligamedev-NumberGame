@@ -4,14 +4,16 @@ import { MistakeRecord, Question, ChatMessage, Operator } from "../types";
 // Cache backgrounds to avoid regenerating every time we switch tabs
 const backgroundCache: Record<number, string> = {};
 
+// Helper: Determine if we should use direct fetch (for OpenAI-compatible Zeabur/Proxies) or Google SDK
+const useOpenAIProtocol = () => {
+    return process.env.GEMINI_API_KEY?.startsWith('sk-');
+};
+
 const initAI = () => {
-  // Always create a new instance to pick up the latest key from process.env if it was just set via dialog
   if (!process.env.API_KEY) {
-    // console.warn("Gemini API Key missing"); // Suppress warning to avoid console spam
     return null;
   }
   
-  // Support custom Base URL for Zeabur AI Hub or other proxies
   const options: any = { apiKey: process.env.API_KEY };
   if (process.env.GEMINI_API_BASE_URL) {
     options.baseUrl = process.env.GEMINI_API_BASE_URL;
@@ -19,6 +21,54 @@ const initAI = () => {
   
   return new GoogleGenAI(options);
 };
+
+// --- Raw Fetch Helper for OpenAI Protocol (Zeabur AI Hub) ---
+async function fetchOpenAICompat(
+    messages: { role: string; content: string }[], 
+    systemInstruction?: string,
+    model: string = "gemini-3-flash-preview"
+): Promise<string | null> {
+    if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_API_BASE_URL) return null;
+
+    try {
+        const payloadMessages = [];
+        if (systemInstruction) {
+            payloadMessages.push({ role: 'system', content: systemInstruction });
+        }
+        payloadMessages.push(...messages);
+
+        // Adjust endpoint: ensure it ends with /chat/completions or whatever the proxy expects
+        // Zeabur usually provides a base URL like https://api.zeabur.com/gemini/v1
+        // We need to append /chat/completions for standard OpenAI compatibility
+        let baseUrl = process.env.GEMINI_API_BASE_URL;
+        if (!baseUrl.endsWith('/')) baseUrl += '/';
+        const url = `${baseUrl}chat/completions`;
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${process.env.GEMINI_API_KEY}`
+            },
+            body: JSON.stringify({
+                model: model,
+                messages: payloadMessages,
+                temperature: 0.7
+            })
+        });
+
+        if (!response.ok) {
+            console.error("Zeabur/OpenAI Fetch Error:", response.status, await response.text());
+            return null;
+        }
+
+        const data = await response.json();
+        return data.choices?.[0]?.message?.content || null;
+    } catch (e) {
+        console.error("Fetch Error", e);
+        return null;
+    }
+}
 
 // --- Audio Decoding Helpers ---
 function decode(base64: string) {
@@ -52,36 +102,48 @@ async function decodeAudioData(
 // -----------------------------
 
 export const getEncouragement = async (streak: number, level: number): Promise<string> => {
+  const prompt = `User is a 3rd grade student in China. Current streak: ${streak}, Level: ${level}. Give a very short, enthusiastic encouragement message in Chinese (Simplified). Max 15 words.`;
+  
+  if (useOpenAIProtocol()) {
+      const text = await fetchOpenAICompat([{ role: 'user', content: prompt }]);
+      return text || "你做得真棒！继续加油！";
+  }
+
   const ai = initAI();
   if (!ai) return "你做得真棒！继续加油！";
 
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `User is a 3rd grade student in China. Current streak: ${streak}, Level: ${level}. 
-      Give a very short, enthusiastic encouragement message in Chinese (Simplified). Max 15 words.`,
+      contents: prompt,
     });
     return response.text || "太棒了！继续挑战！";
   } catch (error) {
-    console.error("AI Error", error);
     return "太棒了！继续挑战！";
   }
 };
 
 export const analyzeMistakes = async (mistakes: MistakeRecord[]): Promise<string> => {
-    const ai = initAI();
-    if (!ai) return "分析服务暂时不可用。";
-  
     if (mistakes.length === 0) return "没有错题，太完美了！";
   
     const recentMistakes = mistakes.slice(-5).map(m => 
       `${m.question.num1} ${m.question.operator} ${m.question.num2} = ? (User: ${m.userAnswer}, Correct: ${m.question.answer})`
     ).join("\n");
+    const prompt = `Analyze mistakes:\n${recentMistakes}\nOutput: Short, encouraging advice in Chinese.`;
+    const system = `Role: Math tutor for 3rd grader.`;
+
+    if (useOpenAIProtocol()) {
+        const text = await fetchOpenAICompat([{ role: 'user', content: prompt }], system);
+        return text || "加油，下次注意看清题目哦！";
+    }
+
+    const ai = initAI();
+    if (!ai) return "分析服务暂时不可用。";
   
     try {
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Role: Math tutor for 3rd grader. Analyze mistakes:\n${recentMistakes}\nOutput: Short, encouraging advice in Chinese.`,
+        contents: `${system} ${prompt}`,
       });
       return response.text || "加油，下次注意看清题目哦！";
     } catch (error) {
@@ -90,21 +152,31 @@ export const analyzeMistakes = async (mistakes: MistakeRecord[]): Promise<string
 };
 
 export const chatWithTutor = async (history: ChatMessage[], newMessage: string): Promise<string> => {
+  const systemInstruction = `You are a friendly, patient, and fun math tutor for a Chinese 3rd-grade student named "小小探险家". 
+  Your goal is to help them love math. 
+  - Do NOT just give answers to math problems. Guide them to solve it step-by-step.
+  - Use emojis. 
+  - Keep responses concise (under 50 words) unless explaining a concept.
+  - Encourage them to ask questions about "why" and "how".
+  - If they say they are frustrated, comfort them.`;
+
+  if (useOpenAIProtocol()) {
+      // Map history to OpenAI format
+      const messages = history.map(h => ({ role: h.role === 'model' ? 'assistant' : 'user', content: h.text }));
+      messages.push({ role: 'user', content: newMessage });
+      
+      const text = await fetchOpenAICompat(messages, systemInstruction);
+      return text || "我没听清，能再说一遍吗？";
+  }
+
   const ai = initAI();
   if (!ai) return "我现在有点累，稍后再聊吧。";
 
   try {
     const chat = ai.chats.create({
       model: "gemini-3-flash-preview",
-      config: {
-        systemInstruction: `You are a friendly, patient, and fun math tutor for a Chinese 3rd-grade student named "小小探险家". 
-        Your goal is to help them love math. 
-        - Do NOT just give answers to math problems. Guide them to solve it step-by-step.
-        - Use emojis. 
-        - Keep responses concise (under 50 words) unless explaining a concept.
-        - Encourage them to ask questions about "why" and "how".
-        - If they say they are frustrated, comfort them.`,
-      },
+      config: { systemInstruction },
+      history: history.map(h => ({ role: h.role, parts: [{ text: h.text }] }))
     });
 
     const response = await chat.sendMessage({ message: newMessage });
@@ -116,7 +188,10 @@ export const chatWithTutor = async (history: ChatMessage[], newMessage: string):
 };
 
 export const generateSpeech = async (text: string): Promise<AudioBuffer | null> => {
-  const ai = initAI();
+  const ai = initAI(); // Image/Audio generation might still need Google SDK if Zeabur supports it via standard endpoint, 
+                       // OR we need to skip if using OpenAI protocol if Zeabur doesn't support audio via OpenAI chat completions.
+                       // Currently assuming Zeabur might not support Google-specific TTS via OpenAI endpoint easily.
+                       // We will try Google SDK anyway for TTS as it uses a specific endpoint that might be proxied differently.
   if (!ai) return null;
 
   try {
@@ -152,23 +227,29 @@ export const generateSpeech = async (text: string): Promise<AudioBuffer | null> 
 };
 
 export const analyzeStage = async (questions: Question[], answers: {qId: string, correct: boolean, val: number}[]): Promise<string> => {
-  const ai = initAI();
-  if (!ai) return "本关挑战结束！";
-
   const summary = questions.map(q => {
     const ans = answers.find(a => a.qId === q.id);
     return `Q: ${q.bossText ? q.bossText : `${q.num1}${q.operator}${q.num2}`} | Correct Answer: ${q.answer} | User Result: ${ans?.correct ? 'Correct' : `Wrong (answered ${ans?.val})`}`;
   }).join('\n');
 
+  const prompt = `Analyze this math game stage performance for a 3rd grader:
+  ${summary}
+  Provide a 2-sentence feedback in Chinese. 
+  1. Praise what they did well.
+  2. Point out one specific thing to improve (if any errors) or give a high-five.`;
+
+  if (useOpenAIProtocol()) {
+      const text = await fetchOpenAICompat([{ role: 'user', content: prompt }]);
+      return text || "做得不错！继续挑战下一关吧！";
+  }
+
+  const ai = initAI();
+  if (!ai) return "本关挑战结束！";
+
   try {
     const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Analyze this math game stage performance for a 3rd grader:
-        ${summary}
-        
-        Provide a 2-sentence feedback in Chinese. 
-        1. Praise what they did well.
-        2. Point out one specific thing to improve (if any errors) or give a high-five.`
+        contents: prompt
     });
     return response.text || "做得不错！继续挑战下一关吧！";
   } catch (e) {
@@ -177,21 +258,35 @@ export const analyzeStage = async (questions: Question[], answers: {qId: string,
 };
 
 export const generateBossQuestion = async (level: number, operators: Operator[]): Promise<{text: string, answer: number} | null> => {
+    const opString = operators.join(', ');
+    const prompt = `Generate a fun math word problem (Boss Battle) for a 3rd grader.
+    Level context: Numbers up to 1000.
+    Allowed Operations: ${opString}.
+    Language: Chinese (Simplified).
+    Theme: Fantasy RPG (Dragons, Treasure, Magic) or Space.
+    Format: JSON object with "question" (string) and "answer" (number).
+    Example: {"question": "恶龙抓走了公主！你需要3把钥匙才能打开笼子，每把钥匙需要25个魔法石。你现在有10个魔法石，还需要多少个？", "answer": 65}`;
+
+    if (useOpenAIProtocol()) {
+        const text = await fetchOpenAICompat([{ role: 'user', content: prompt }], undefined, "gemini-3-flash-preview");
+        if(text) {
+             try {
+                // Try to find JSON in text if md block exists
+                const cleanText = text.replace(/```json/g, '').replace(/```/g, '');
+                const result = JSON.parse(cleanText);
+                return { text: result.question, answer: Number(result.answer) };
+             } catch (e) { return null; }
+        }
+        return null;
+    }
+
     const ai = initAI();
     if (!ai) return null;
-
-    const opString = operators.join(', ');
 
     try {
         const response = await ai.models.generateContent({
             model: "gemini-3-flash-preview",
-            contents: `Generate a fun math word problem (Boss Battle) for a 3rd grader.
-            Level context: Numbers up to 1000.
-            Allowed Operations: ${opString}.
-            Language: Chinese (Simplified).
-            Theme: Fantasy RPG (Dragons, Treasure, Magic) or Space.
-            Format: JSON object with "question" (string) and "answer" (number).
-            Example: {"question": "恶龙抓走了公主！你需要3把钥匙才能打开笼子，每把钥匙需要25个魔法石。你现在有10个魔法石，还需要多少个？", "answer": 65}`,
+            contents: prompt,
             config: {
                 responseMimeType: "application/json"
             }
@@ -230,29 +325,34 @@ export const getZoneBackground = async (zoneIndex: number, forceRefresh: boolean
         return backgroundCache[cacheKey];
     }
 
+    // Zeabur OpenAI proxy likely does NOT support Image Generation via /v1/images/generations compatible with Gemini 2.5 Flash Image params
+    // We will stick to Google SDK for images if possible, or skip if key is SK-based and proxy is strictly chat
+    // However, user asked for Gemini 3 Flash Preview mainly. 
+    // Image gen might fail if using SK key with Google SDK. 
+    // We will try Google SDK anyway as it's the best bet for "gemini-2.5-flash-image".
+    
     const ai = initAI(); 
     if (!ai) return null;
 
     const theme = ZONES[(zoneIndex - 1) % ZONES.length];
     
-    // UPDATED PROMPT: Strict Flat Vector Art Style
     const prompt = `Vector art style game background of ${theme}. 
     Aesthetic: Clean flat vector illustration, vibrant colors, geometric shapes, minimal shading. 
     Suitable for a children's math educational game map. No text. Aspect Ratio 1:1.`;
 
     try {
         const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image', // Matching Zeabur AI Hub model code
-      contents: {
-          parts: [{ text: prompt }]
-      },
-      config: {
-          imageConfig: {
-              aspectRatio: "1:1",
-              imageSize: "1K"
-          },
-      }
-    });
+            model: 'gemini-2.5-flash-image', // Matching Zeabur AI Hub model code
+            contents: {
+                parts: [{ text: prompt }]
+            },
+            config: {
+                imageConfig: {
+                    aspectRatio: "1:1",
+                    imageSize: "1K"
+                },
+            }
+        });
 
         for (const part of response.candidates?.[0]?.content?.parts || []) {
             if (part.inlineData) {

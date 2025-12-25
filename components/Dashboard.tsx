@@ -1,11 +1,10 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { UserStats, Operator } from '../types';
 import { BADGES, LEVEL_Thresholds } from '../constants';
-import { Star, TrendingUp, History, Award, Check, Sword, Zap, Clock, Lock, MapPin, Castle, Crown, Palette, Wand2, Loader2, Image as ImageIcon } from 'lucide-react';
+import { Star, TrendingUp, History, Award, Check, Sword, Zap, Lock, MapPin, Castle, Crown } from 'lucide-react';
 import { getXpProgress } from '../services/mathEngine';
 import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
-  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar 
+  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer 
 } from 'recharts';
 
 interface Props {
@@ -21,12 +20,7 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
   const [activeTab, setActiveTab] = useState<'map' | 'badges' | 'stats'>('map');
   const scrollRef = useRef<HTMLDivElement>(null);
   
-  const nextLevelXp = LEVEL_Thresholds[stats.level] || 10000;
   const progress = getXpProgress(stats.xp, stats.level, LEVEL_Thresholds);
-
-  const unlockedBadges = useMemo(() => {
-    return BADGES.filter(b => stats.badges.includes(b.id));
-  }, [stats.badges]);
 
   // Scroll to current stage on mount (Vertical Map)
   useEffect(() => {
@@ -41,10 +35,6 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
     }
   }, [activeTab, stats.currentStage]);
 
-  // Prepare chart data (last 7 days)
-  const chartData = stats.dailyActivity.slice(-7);
-
-  // Prepare Radar Data for Stats
   const radarData = useMemo(() => {
       const ops = [Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE];
       const labels: Record<Operator, string> = { [Operator.ADD]: '加法', [Operator.SUBTRACT]: '减法', [Operator.MULTIPLY]: '乘法', [Operator.DIVIDE]: '除法' };
@@ -60,44 +50,27 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
       });
   }, [stats.operatorStats]);
 
-  // Prepare Speed Data
-  const speedData = useMemo(() => {
-    const ops = [Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE];
-    const labels: Record<Operator, string> = { [Operator.ADD]: '加法', [Operator.SUBTRACT]: '减法', [Operator.MULTIPLY]: '乘法', [Operator.DIVIDE]: '除法' };
-    
-    return ops.map(op => {
-        const s = stats.operatorStats?.[op] || { attempts: 0, totalTimeMs: 0 };
-        const avg = s.attempts > 0 ? (s.totalTimeMs / s.attempts) / 1000 : 0;
-        return {
-            name: labels[op],
-            time: Number(avg.toFixed(1))
-        };
-    });
-  }, [stats.operatorStats]);
-
-
-  const renderOperatorBtn = (op: Operator, label: string, colorClass: string) => {
+  const renderOperatorBtn = (op: Operator, colorClass: string) => {
     const isSelected = selectedOperators.includes(op);
     return (
       <button
         onClick={() => onToggleOperator(op)}
-        className={`flex-1 py-3 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all shadow-sm border-b-4 active:border-b-0 active:translate-y-1 ${
+        className={`flex-1 aspect-square rounded-xl font-bold text-2xl flex items-center justify-center transition-all shadow-sm border-b-4 active:border-b-0 active:translate-y-1 ${
           isSelected 
             ? `${colorClass} text-white border-black/20` 
             : 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200'
         }`}
       >
-        <span className="font-cartoon text-2xl">{op}</span>
-        {isSelected && <Check size={16} strokeWidth={4} />}
+        {op === Operator.MULTIPLY ? '×' : op === Operator.DIVIDE ? '÷' : op}
+        {isSelected && <div className="absolute top-1 right-1"><Check size={12} strokeWidth={4} /></div>}
       </button>
     );
   };
 
-  // Helper for map path calculation
   const getMapPosition = (index: number) => {
-      const y = index * 90; // 90px vertical spacing
-      const xOffset = Math.sin(index * 0.8) * 35; // 35% swing from center
-      const x = 50 + xOffset; // Center at 50%
+      const y = index * 90; 
+      const xOffset = Math.sin(index * 0.8) * 35; 
+      const x = 50 + xOffset; 
       return { x: `${x}%`, y };
   };
 
@@ -114,10 +87,9 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
 
     return (
         <div 
-            className="relative w-full px-4"
+            className="relative w-full px-4 mt-4"
             style={{ height: `${totalHeight}px` }}
         >
-            {/* Draw Path Lines First */}
             <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0 filter drop-shadow-md">
                 {stages.map((stageNum) => {
                     if (stageNum >= totalStages) return null;
@@ -142,7 +114,6 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
                 })}
             </svg>
 
-            {/* Render Nodes */}
             {stages.map((stageNum) => {
                 const pos = getMapPosition(stageNum);
                 const isLocked = stageNum > stats.currentStage;
@@ -201,7 +172,6 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
                                     )}
                                 </div>
 
-                                {/* Stars for completed levels */}
                                 {!isLocked && stars > 0 && (
                                     <div className={`absolute ${isBoss ? '-bottom-6 rotate-45' : '-bottom-2'} flex gap-0.5 bg-black/60 px-1.5 py-0.5 rounded-full backdrop-blur-sm z-20`}>
                                         {[1, 2, 3].map(i => (
@@ -210,7 +180,6 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
                                     </div>
                                 )}
                                 
-                                {/* Boss Crown for completed Boss */}
                                 {!isLocked && isBoss && stars > 0 && (
                                      <Crown size={20} className="absolute -top-6 text-yellow-500 fill-yellow-200 animate-bounce" />
                                 )}
@@ -224,90 +193,118 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
-        {/* Top Stats Bar */}
-        <div className="bg-white p-4 shadow-sm z-20 flex justify-between items-center sticky top-0">
-            <div className="flex items-center gap-2">
-                <div className="bg-blue-100 p-2 rounded-lg text-blue-600">
-                    <span className="font-bold text-xl">{stats.level}</span> <span className="text-xs">Lv</span>
-                </div>
-                <div className="flex flex-col w-32">
-                    <div className="flex justify-between text-xs text-gray-500 mb-1">
-                        <span>XP</span>
-                        <span>{Math.floor(progress)}%</span>
-                    </div>
-                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
-                    </div>
-                </div>
+    <div className="flex flex-col h-full bg-[#f0f9ff]">
+        {/* Top User Bar */}
+        <div className="bg-white p-4 m-4 rounded-3xl shadow-sm flex items-center gap-4 border border-blue-100 z-20 sticky top-4">
+            <div className="w-16 h-16 bg-yellow-400 rounded-full flex items-center justify-center text-4xl border-4 border-yellow-200 shadow-inner">
+                🦁
             </div>
-
-            <div className="flex gap-4">
-                 <div className="flex items-center gap-1 text-orange-500">
-                    <Zap size={18} className="fill-orange-500" />
-                    <span className="font-bold">{stats.currentStreak}</span>
+            <div className="flex-1">
+                <div className="flex justify-between items-baseline mb-1">
+                    <h2 className="text-xl font-bold text-gray-800">小小探险家</h2>
+                    <div className="text-sm font-bold text-gray-500">目标: 100</div>
                 </div>
-                <div className="flex items-center gap-1 text-yellow-500">
-                    <Star size={18} className="fill-yellow-500" />
-                    <span className="font-bold">{Object.values(stats.stageStars).reduce((a, b) => a + b, 0)}</span>
+                <div className="flex items-center gap-2">
+                    <div className="px-2 py-0.5 bg-blue-100 text-blue-600 rounded text-xs font-bold">
+                        Lv.{stats.level}
+                    </div>
+                    <div className="text-xs text-gray-400">星星: {Object.values(stats.stageStars).reduce((a, b) => a + b, 0)} ⭐</div>
+                </div>
+                <div className="mt-2 h-3 bg-gray-100 rounded-full overflow-hidden relative">
+                    <div className="absolute top-0 left-0 h-full bg-green-500 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
+                    <div className="absolute top-0 right-2 text-[10px] text-gray-400 leading-3">XP: {stats.xp}</div>
                 </div>
             </div>
         </div>
 
-        {/* Tab Switcher */}
-        <div className="flex p-2 bg-white border-b border-gray-100 gap-2 overflow-x-auto z-20">
-            <button 
-                onClick={() => setActiveTab('map')}
-                className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 text-sm font-bold transition-colors whitespace-nowrap
-                ${activeTab === 'map' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500'}`}
-            >
-                <MapPin size={16} /> 探险地图
-            </button>
-            <button 
-                onClick={() => setActiveTab('stats')}
-                className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 text-sm font-bold transition-colors whitespace-nowrap
-                ${activeTab === 'stats' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500'}`}
-            >
-                <TrendingUp size={16} /> 训练数据
-            </button>
-            <button 
-                onClick={() => setActiveTab('badges')}
-                className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 text-sm font-bold transition-colors whitespace-nowrap
-                ${activeTab === 'badges' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500'}`}
-            >
-                <Award size={16} /> 荣誉徽章
-            </button>
+        {/* Tab Switcher (Segmented Control Style) */}
+        <div className="px-4 mb-4 z-20 sticky top-28">
+             <div className="flex bg-white p-1.5 rounded-2xl shadow-sm border border-blue-100">
+                <button 
+                    onClick={() => setActiveTab('map')}
+                    className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all duration-300
+                    ${activeTab === 'map' ? 'bg-blue-500 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
+                >
+                    冒险地图
+                </button>
+                <button 
+                    onClick={() => setActiveTab('badges')}
+                    className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all duration-300
+                    ${activeTab === 'badges' ? 'bg-blue-500 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
+                >
+                    荣誉徽章
+                </button>
+                <button 
+                    onClick={() => setActiveTab('stats')}
+                    className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all duration-300
+                    ${activeTab === 'stats' ? 'bg-blue-500 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
+                >
+                    能力分析
+                </button>
+            </div>
         </div>
 
-        {/* Main Content Area */}
-        <div className="flex-1 overflow-y-auto relative bg-[#f0f9ff]" ref={scrollRef}>
-            {activeTab === 'map' && renderVerticalMap()}
+        <div className="flex-1 overflow-y-auto pb-8 relative" ref={scrollRef}>
+            {activeTab === 'map' && (
+                <div className="flex flex-col gap-4">
+                    {/* Control Panel Section */}
+                    <div className="px-4 flex gap-4">
+                        {/* Training Items - Compact */}
+                        <div className="bg-white p-4 rounded-3xl shadow-sm border border-blue-100 w-5/12">
+                            <h3 className="text-xs font-bold text-gray-500 mb-3 flex items-center gap-1">
+                                <Sword size={14} /> 训练项目
+                            </h3>
+                            <div className="grid grid-cols-2 gap-2">
+                                {renderOperatorBtn(Operator.ADD, 'bg-blue-500 border-blue-600')}
+                                {renderOperatorBtn(Operator.SUBTRACT, 'bg-red-500 border-red-600')}
+                                {renderOperatorBtn(Operator.MULTIPLY, 'bg-orange-500 border-orange-600')}
+                                {renderOperatorBtn(Operator.DIVIDE, 'bg-purple-500 border-purple-600')}
+                            </div>
+                        </div>
 
-            {activeTab === 'stats' && (
-                <div className="p-4 space-y-6 pb-20">
-                     {/* Operator Toggle */}
-                     <div className="bg-white p-4 rounded-2xl shadow-sm border border-blue-100">
-                        <h3 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
-                            <Sword size={18} className="text-blue-500" /> 训练项目
-                        </h3>
-                        <div className="flex gap-2">
-                            {renderOperatorBtn(Operator.ADD, '加法', 'bg-pink-500 border-pink-600 shadow-pink-200')}
-                            {renderOperatorBtn(Operator.SUBTRACT, '减法', 'bg-blue-500 border-blue-600 shadow-blue-200')}
-                            {renderOperatorBtn(Operator.MULTIPLY, '乘法', 'bg-purple-500 border-purple-600 shadow-purple-200')}
-                            {renderOperatorBtn(Operator.DIVIDE, '除法', 'bg-orange-500 border-orange-600 shadow-orange-200')}
+                        {/* Actions - Big Buttons */}
+                        <div className="flex-1 flex gap-3">
+                            <button 
+                                onClick={onBossChallenge}
+                                className="flex-1 bg-white border border-red-100 rounded-3xl p-3 flex flex-col items-center justify-center gap-2 shadow-sm hover:shadow-md transition-all active:scale-95 group"
+                            >
+                                <div className="w-10 h-10 bg-red-50 text-red-500 rounded-full flex items-center justify-center group-hover:bg-red-500 group-hover:text-white transition-colors">
+                                    <Sword size={20} />
+                                </div>
+                                <span className="text-xs font-bold text-red-500">BOSS 练习场</span>
+                            </button>
+
+                            <button 
+                                onClick={onReview}
+                                className="flex-1 bg-white border border-purple-100 rounded-3xl p-3 flex flex-col items-center justify-center gap-2 shadow-sm hover:shadow-md transition-all active:scale-95 group relative"
+                            >
+                                {stats.mistakes.length > 0 && (
+                                    <span className="absolute top-2 right-2 w-3 h-3 bg-red-500 rounded-full animate-bounce" />
+                                )}
+                                <div className="w-10 h-10 bg-purple-50 text-purple-500 rounded-full flex items-center justify-center group-hover:bg-purple-500 group-hover:text-white transition-colors">
+                                    <History size={20} />
+                                </div>
+                                <span className="text-xs font-bold text-purple-500">错题特训</span>
+                            </button>
                         </div>
                     </div>
 
-                    {/* Charts */}
-                    <div className="bg-white p-4 rounded-2xl shadow-sm border border-blue-100">
-                        <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2">
-                            <TrendingUp size={18} className="text-blue-500" /> 能力雷达
+                    {/* Map */}
+                    {renderVerticalMap()}
+                </div>
+            )}
+
+            {activeTab === 'stats' && (
+                <div className="p-4 space-y-6">
+                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
+                        <h3 className="font-bold text-gray-700 mb-6 flex items-center gap-2 text-lg">
+                            <TrendingUp size={20} className="text-blue-500" /> 能力雷达图
                         </h3>
                         <div className="h-64 w-full">
                             <ResponsiveContainer width="100%" height="100%">
                                 <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
                                     <PolarGrid stroke="#e5e7eb" />
-                                    <PolarAngleAxis dataKey="subject" tick={{ fill: '#6b7280', fontSize: 12 }} />
+                                    <PolarAngleAxis dataKey="subject" tick={{ fill: '#6b7280', fontSize: 14, fontWeight: 'bold' }} />
                                     <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
                                     <Radar name="Accuracy" dataKey="A" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.3} />
                                 </RadarChart>
@@ -318,28 +315,22 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
             )}
 
             {activeTab === 'badges' && (
-                <div className="p-4 grid grid-cols-2 gap-3 pb-20">
+                <div className="p-4 grid grid-cols-2 gap-4">
                     {BADGES.map(badge => {
                         const isUnlocked = stats.badges.includes(badge.id);
                         return (
-                            <div key={badge.id} className={`p-3 rounded-2xl border-b-4 flex flex-col items-center text-center gap-2 relative overflow-hidden ${isUnlocked ? 'bg-white border-yellow-200 shadow-sm' : 'bg-gray-100 border-gray-200 opacity-70 grayscale'}`}>
-                                <div className="text-4xl mb-1">{badge.icon}</div>
-                                <div className="font-bold text-gray-800 text-sm">{badge.name}</div>
-                                <div className="text-xs text-gray-500 leading-tight">{badge.description}</div>
-                                {!isUnlocked && <Lock size={16} className="absolute top-2 right-2 text-gray-400" />}
+                            <div key={badge.id} className={`p-4 rounded-3xl border-b-4 flex flex-col items-center text-center gap-3 relative overflow-hidden transition-all ${isUnlocked ? 'bg-white border-yellow-200 shadow-sm' : 'bg-gray-100 border-gray-200 opacity-60 grayscale'}`}>
+                                <div className="text-5xl drop-shadow-sm">{badge.icon}</div>
+                                <div>
+                                    <div className="font-bold text-gray-800">{badge.name}</div>
+                                    <div className="text-xs text-gray-500 mt-1">{badge.description}</div>
+                                </div>
+                                {!isUnlocked && <Lock size={20} className="absolute top-3 right-3 text-gray-400" />}
                             </div>
                         )
                     })}
                 </div>
             )}
-        </div>
-        
-        {/* Review Button Floating */}
-        <div className="absolute bottom-6 right-6 z-30">
-             <button onClick={onReview} className="bg-white p-3 rounded-full shadow-lg border border-gray-100 text-orange-500 hover:scale-110 transition-transform relative">
-                <History size={24} />
-                {stats.mistakes.length > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 flex items-center justify-center rounded-full animate-pulse">{stats.mistakes.length}</span>}
-            </button>
         </div>
     </div>
   );
