@@ -27,22 +27,26 @@ async function fetchOpenAICompat(
     messages: { role: string; content: string }[], 
     systemInstruction?: string,
     model: string = "gemini-3-flash-preview",
-    jsonMode: boolean = false // 新增参数控制是否使用 JSON 模式
+    jsonMode: boolean = false
 ): Promise<string | null> {
-    if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_API_BASE_URL) return null;
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    const baseUrl = process.env.GEMINI_API_BASE_URL;
+
+    if (!apiKey || !baseUrl) {
+        return `配置错误：缺失 ${!apiKey ? 'API_KEY' : ''} ${!baseUrl ? 'BASE_URL' : ''}。请检查环境变量。`;
+    }
 
     try {
         const payloadMessages = [];
         if (systemInstruction) {
-            payloadMessages.push({ role: 'user', content: `[系统指令]: ${systemInstruction}\n\n[用户请求]: ${messages[0].content}` });
-            payloadMessages.push(...messages.slice(1));
+            payloadMessages.push({ role: 'user', content: `[重要指令 - 请遵守]: ${systemInstruction}\n\n[学生当前问题/状态]: ${messages[messages.length - 1].content}` });
         } else {
             payloadMessages.push(...messages);
         }
 
-        let baseUrl = process.env.GEMINI_API_BASE_URL;
-        if (!baseUrl.endsWith('/')) baseUrl += '/';
-        const url = `${baseUrl}chat/completions`;
+        let cleanBaseUrl = baseUrl;
+        if (!cleanBaseUrl.endsWith('/')) cleanBaseUrl += '/';
+        const url = `${cleanBaseUrl}chat/completions`;
 
         const body: any = {
             model: model,
@@ -50,7 +54,6 @@ async function fetchOpenAICompat(
             temperature: 0.7,
         };
 
-        // 仅在需要生成 Boss 题目等结构化数据时启用 JSON 模式
         if (jsonMode) {
             body.response_format = { type: "json_object" };
         }
@@ -59,25 +62,29 @@ async function fetchOpenAICompat(
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.GEMINI_API_KEY}`
+                'Authorization': `Bearer ${apiKey}`
             },
             body: JSON.stringify(body)
         });
 
         if (!response.ok) {
             const errText = await response.text();
-            console.error("Zeabur/OpenAI Fetch Error:", response.status, errText);
+            console.error("Zeabur/OpenAI Error:", response.status, errText);
+            
+            // 如果 404 且没试过加 google/ 前缀，则尝试
             if (response.status === 404 && !model.includes('/')) {
                 return fetchOpenAICompat(messages, systemInstruction, `google/${model}`, jsonMode);
             }
-            return null;
+            
+            return `API 访问失败 (${response.status}): ${errText.substring(0, 100)}`;
         }
 
         const data = await response.json();
-        return data.choices?.[0]?.message?.content || null;
-    } catch (e) {
+        const content = data.choices?.[0]?.message?.content;
+        return content || "API 响应正常但内容为空，请检查模型支持情况。";
+    } catch (e: any) {
         console.error("Fetch Error", e);
-        return null;
+        return `网络连接异常: ${e.message}`;
     }
 }
 
@@ -150,7 +157,7 @@ export const analyzeMistakes = async (mistakes: MistakeRecord[]): Promise<string
 
     if (useOpenAIProtocol()) {
         const text = await fetchOpenAICompat([{ role: 'user', content: prompt }], system);
-        return text || "老师正在思考你的错题，请稍后再试。";
+        return text || "AI 诊断功能目前不可用，请确认环境变量配置。";
     }
 
     const ai = initAI();
