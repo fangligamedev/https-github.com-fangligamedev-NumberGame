@@ -164,7 +164,7 @@ const GameArena: React.FC<Props> = ({
       playFeedbackVoice(msg, true);
       setTimeout(() => {
         onAnswer(true, numVal, timeTaken);
-      }, 800);
+      }, 1000); // Slightly increased delay so user can see the green check
     } else {
       setStatus('wrong');
       const msg = `正确答案是 ${question.answer}`;
@@ -261,23 +261,7 @@ const GameArena: React.FC<Props> = ({
           </div>
       )}
 
-      {/* Correct/Wrong Overlay - Full Screen */}
-      {status !== 'idle' && (
-          <div className={`absolute inset-0 z-40 flex items-center justify-center backdrop-blur-md animate-pop ${status === 'correct' ? 'bg-green-500/30' : 'bg-red-500/30'}`}>
-              <div className="text-center transform scale-150 p-8 bg-white/90 rounded-3xl shadow-2xl">
-                  {status === 'correct' ? (
-                      <CheckCircle className="text-green-500 w-32 h-32 mx-auto mb-4 animate-bounce-small" />
-                  ) : (
-                      <XCircle className="text-red-500 w-32 h-32 mx-auto mb-4 animate-pulse" />
-                  )}
-                  <p className={`text-4xl font-bold font-cartoon ${status === 'correct' ? 'text-green-600' : 'text-red-600'}`}>
-                    {feedbackMsg}
-                  </p>
-              </div>
-          </div>
-      )}
-      
-      {/* Boss Intro Overlay */}
+      {/* Boss Intro Overlay - Keep only the Boss Intro full screen */}
       {showBossIntro && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-red-900/95 backdrop-blur-sm rounded-3xl animate-pop overflow-hidden">
            <div className="absolute inset-0 bg-white opacity-20 animate-ping"></div>
@@ -311,7 +295,7 @@ const GameArena: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Encouragement */}
+      {/* Encouragement (Only when idle) */}
       {encouragement && status === 'idle' && !isBoss && (
         <div className="mb-4 animate-pop bg-yellow-100/90 text-yellow-800 px-6 py-2 rounded-full text-sm font-bold shadow-lg border-2 border-white relative z-10">
           💡 AI 老师: {encouragement}
@@ -340,22 +324,28 @@ const GameArena: React.FC<Props> = ({
                 </p>
             </div>
         ) : (
-            <div className="flex items-center gap-4 text-5xl md:text-7xl font-bold text-gray-800 mb-8 font-cartoon drop-shadow-sm">
-            <span className="w-24 text-center">{question.num1}</span>
-            <span className={`text-${isReviewMode ? 'purple' : 'blue'}-500`}>{getOperatorDisplay(question.operator)}</span>
-            <span className="w-24 text-center">{question.num2}</span>
-            <span>=</span>
-            <div className="w-32 h-20 bg-gray-100/50 rounded-xl border-4 border-gray-300 flex items-center justify-center text-gray-800 overflow-hidden relative shadow-inner">
-                {status === 'idle' ? (
-                    <span className="animate-pulse text-gray-400">?</span>
-                ) : (
-                    <span className={status === 'correct' ? 'text-green-600' : 'text-red-600'}>{inputValue}</span>
-                )}
-            </div>
+            <div className="flex items-center gap-4 text-5xl md:text-7xl font-bold text-gray-800 mb-8 font-cartoon drop-shadow-sm flex-wrap justify-center">
+                <span className="w-24 text-center">{question.num1}</span>
+                <span className={`text-${isReviewMode ? 'purple' : 'blue'}-500`}>{getOperatorDisplay(question.operator)}</span>
+                <span className="w-24 text-center">{question.num2}</span>
+                <span>=</span>
+                <div className={`w-32 h-24 rounded-xl border-4 flex items-center justify-center text-gray-800 overflow-hidden relative shadow-inner transition-colors duration-300 ${
+                    status === 'idle' 
+                        ? 'bg-gray-100/50 border-gray-300' 
+                        : status === 'correct' 
+                            ? 'bg-green-100 border-green-500' 
+                            : 'bg-red-100 border-red-500'
+                }`}>
+                    {status === 'idle' ? (
+                        <span className="animate-pulse text-gray-400">?</span>
+                    ) : (
+                        <span className={`text-5xl ${status === 'correct' ? 'text-green-600' : 'text-red-600'}`}>{inputValue}</span>
+                    )}
+                </div>
             </div>
         )}
 
-        {/* Input Area */}
+        {/* Input Area (Visible when IDLE) */}
         {status === 'idle' && !showBossIntro && (
           <form onSubmit={(e) => handleSubmit(e)} className="w-full max-w-sm flex gap-2 animate-pop">
              <input 
@@ -392,12 +382,33 @@ const GameArena: React.FC<Props> = ({
              </button>
           </form>
         )}
+
+        {/* Inline Feedback Display (Visible when NOT IDLE) */}
+        {status !== 'idle' && (
+             <div className={`mt-2 w-full max-w-sm flex flex-col items-center justify-center p-4 rounded-2xl animate-pop border-2 shadow-sm ${
+                 status === 'correct' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+             }`}>
+                <div className="flex items-center gap-3">
+                    {status === 'correct' ? (
+                        <CheckCircle className="text-green-500 w-8 h-8 animate-bounce-small" />
+                    ) : (
+                        <XCircle className="text-red-500 w-8 h-8 animate-shake" />
+                    )}
+                    <span className={`text-2xl font-bold font-cartoon ${status === 'correct' ? 'text-green-600' : 'text-red-600'}`}>
+                        {feedbackMsg}
+                    </span>
+                </div>
+             </div>
+        )}
       </div>
       
-      <div className="mt-8 text-gray-500 text-sm flex flex-col items-center gap-1 bg-white/60 px-4 py-2 rounded-full backdrop-blur-sm shadow-sm relative z-10">
-         <span>按回车键提交答案</span>
-         {isListening && <span className="text-red-500 font-bold animate-pulse">🎤 正在听... (试着说: "25 提交")</span>}
-      </div>
+      {/* Help text */}
+      {status === 'idle' && (
+        <div className="mt-8 text-gray-500 text-sm flex flex-col items-center gap-1 bg-white/60 px-4 py-2 rounded-full backdrop-blur-sm shadow-sm relative z-10">
+            <span>按回车键提交答案</span>
+            {isListening && <span className="text-red-500 font-bold animate-pulse">🎤 正在听... (试着说: "25 提交")</span>}
+        </div>
+      )}
     </div>
   );
 };
