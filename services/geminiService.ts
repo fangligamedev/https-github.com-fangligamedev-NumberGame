@@ -10,7 +10,14 @@ const initAI = () => {
     // console.warn("Gemini API Key missing"); // Suppress warning to avoid console spam
     return null;
   }
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
+  // Support custom Base URL for Zeabur AI Hub or other proxies
+  const options: any = { apiKey: process.env.API_KEY };
+  if (process.env.GEMINI_API_BASE_URL) {
+    options.baseUrl = process.env.GEMINI_API_BASE_URL;
+  }
+  
+  return new GoogleGenAI(options);
 };
 
 // --- Audio Decoding Helpers ---
@@ -235,17 +242,17 @@ export const getZoneBackground = async (zoneIndex: number, forceRefresh: boolean
 
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-image-preview', // High quality for backgrounds
-            contents: {
-                parts: [{ text: prompt }]
-            },
-            config: {
-                imageConfig: {
-                    aspectRatio: "1:1",
-                    imageSize: "1K"
-                },
-            }
-        });
+      model: 'gemini-2.5-flash-image', // Matching Zeabur AI Hub model code
+      contents: {
+          parts: [{ text: prompt }]
+      },
+      config: {
+          imageConfig: {
+              aspectRatio: "1:1",
+              imageSize: "1K"
+          },
+      }
+    });
 
         for (const part of response.candidates?.[0]?.content?.parts || []) {
             if (part.inlineData) {
@@ -267,7 +274,7 @@ export const generateGameImage = async (prompt: string, size: '1K' | '2K' | '4K'
 
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-image-preview',
+            model: 'gemini-2.5-flash-image', // Matching Zeabur AI Hub model code
             contents: {
                 parts: [{ text: prompt }]
             },
