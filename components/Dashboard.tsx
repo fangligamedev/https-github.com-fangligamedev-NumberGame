@@ -1,10 +1,11 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { UserStats, Operator } from '../types';
 import { BADGES, LEVEL_Thresholds } from '../constants';
-import { Star, TrendingUp, History, Award, Check, Sword, Zap, Lock, MapPin, Castle, Crown } from 'lucide-react';
+import { Star, TrendingUp, History, Award, Check, Sword, Zap, Lock, MapPin, Castle, Crown, Clock } from 'lucide-react';
 import { getXpProgress } from '../services/mathEngine';
 import { 
-  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer 
+  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, Tooltip
 } from 'recharts';
 
 interface Props {
@@ -48,6 +49,20 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
               fullMark: 100
           };
       });
+  }, [stats.operatorStats]);
+
+  const speedData = useMemo(() => {
+    const ops = [Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE];
+    const labels: Record<Operator, string> = { [Operator.ADD]: '加法', [Operator.SUBTRACT]: '减法', [Operator.MULTIPLY]: '乘法', [Operator.DIVIDE]: '除法' };
+    
+    return ops.map(op => {
+        const s = stats.operatorStats?.[op] || { attempts: 0, totalTimeMs: 0 };
+        const avg = s.attempts > 0 ? (s.totalTimeMs / s.attempts) / 1000 : 0;
+        return {
+            name: labels[op],
+            time: Number(avg.toFixed(1))
+        };
+    });
   }, [stats.operatorStats]);
 
   const renderOperatorBtn = (op: Operator, colorClass: string) => {
@@ -248,9 +263,9 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
             {activeTab === 'map' && (
                 <div className="flex flex-col gap-4">
                     {/* Control Panel Section */}
-                    <div className="px-4 flex gap-4">
+                    <div className="px-4 flex flex-col md:flex-row gap-4">
                         {/* Training Items - Compact */}
-                        <div className="bg-white p-4 rounded-3xl shadow-sm border border-blue-100 w-5/12">
+                        <div className="bg-white p-4 rounded-3xl shadow-sm border border-blue-100 md:w-52 shrink-0">
                             <h3 className="text-xs font-bold text-gray-500 mb-3 flex items-center gap-1">
                                 <Sword size={14} /> 训练项目
                             </h3>
@@ -263,10 +278,10 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
                         </div>
 
                         {/* Actions - Big Buttons */}
-                        <div className="flex-1 flex gap-3">
+                        <div className="flex-1 flex gap-3 h-full">
                             <button 
                                 onClick={onBossChallenge}
-                                className="flex-1 bg-white border border-red-100 rounded-3xl p-3 flex flex-col items-center justify-center gap-2 shadow-sm hover:shadow-md transition-all active:scale-95 group"
+                                className="flex-1 bg-white border border-red-100 rounded-3xl p-3 flex flex-col items-center justify-center gap-2 shadow-sm hover:shadow-md transition-all active:scale-95 group h-full min-h-[140px]"
                             >
                                 <div className="w-10 h-10 bg-red-50 text-red-500 rounded-full flex items-center justify-center group-hover:bg-red-500 group-hover:text-white transition-colors">
                                     <Sword size={20} />
@@ -276,7 +291,7 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
 
                             <button 
                                 onClick={onReview}
-                                className="flex-1 bg-white border border-purple-100 rounded-3xl p-3 flex flex-col items-center justify-center gap-2 shadow-sm hover:shadow-md transition-all active:scale-95 group relative"
+                                className="flex-1 bg-white border border-purple-100 rounded-3xl p-3 flex flex-col items-center justify-center gap-2 shadow-sm hover:shadow-md transition-all active:scale-95 group relative h-full min-h-[140px]"
                             >
                                 {stats.mistakes.length > 0 && (
                                     <span className="absolute top-2 right-2 w-3 h-3 bg-red-500 rounded-full animate-bounce" />
@@ -296,20 +311,82 @@ const Dashboard: React.FC<Props> = ({ stats, selectedOperators, onToggleOperator
 
             {activeTab === 'stats' && (
                 <div className="p-4 space-y-6">
-                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
-                        <h3 className="font-bold text-gray-700 mb-6 flex items-center gap-2 text-lg">
-                            <TrendingUp size={20} className="text-blue-500" /> 能力雷达图
-                        </h3>
-                        <div className="h-64 w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
-                                    <PolarGrid stroke="#e5e7eb" />
-                                    <PolarAngleAxis dataKey="subject" tick={{ fill: '#6b7280', fontSize: 14, fontWeight: 'bold' }} />
-                                    <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                                    <Radar name="Accuracy" dataKey="A" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.3} />
-                                </RadarChart>
-                            </ResponsiveContainer>
+                    {/* Top Row: Radar & Speed Charts */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
+                            <h3 className="font-bold text-gray-700 mb-6 flex items-center gap-2 text-lg">
+                                <Zap size={20} className="text-yellow-500 fill-yellow-500" /> 能力雷达 (正确率)
+                            </h3>
+                            <div className="h-64 w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
+                                        <PolarGrid stroke="#e5e7eb" />
+                                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#6b7280', fontSize: 14, fontWeight: 'bold' }} />
+                                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                                        <Radar name="Accuracy" dataKey="A" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.3} />
+                                    </RadarChart>
+                                </ResponsiveContainer>
+                            </div>
                         </div>
+
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
+                            <h3 className="font-bold text-gray-700 mb-6 flex items-center gap-2 text-lg">
+                                <Clock size={20} className="text-blue-500" /> 平均答题速度 (秒)
+                            </h3>
+                            <div className="h-64 w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart layout="vertical" data={speedData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                                        <XAxis type="number" hide />
+                                        <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fill: '#4b5563', fontSize: 14, fontWeight: 'bold' }} />
+                                        <Tooltip 
+                                            cursor={{ fill: '#f3f4f6' }}
+                                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                        />
+                                        <Bar dataKey="time" fill="#60a5fa" radius={[0, 4, 4, 0]} barSize={32} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Bottom Row: Detailed Stats Cards */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {[
+                            { op: Operator.ADD, label: '加法', color: 'text-blue-500' },
+                            { op: Operator.SUBTRACT, label: '减法', color: 'text-green-500' },
+                            { op: Operator.MULTIPLY, label: '乘法', color: 'text-purple-500' },
+                            { op: Operator.DIVIDE, label: '除法', color: 'text-orange-500' },
+                        ].map(({ op, label, color }) => {
+                            const s = stats.operatorStats?.[op] || { attempts: 0, correct: 0, totalTimeMs: 0 };
+                            const acc = s.attempts > 0 ? Math.round((s.correct / s.attempts) * 100) : 0;
+                            const avgTime = s.attempts > 0 ? (s.totalTimeMs / s.attempts / 1000).toFixed(1) : '-';
+
+                            return (
+                                <div key={op} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 flex flex-col justify-between h-36 relative overflow-hidden group hover:shadow-md transition-shadow">
+                                    <div className="flex justify-between items-start z-10">
+                                        <span className={`text-lg font-bold ${color}`}>{label}</span>
+                                        <span className="text-2xl font-bold text-gray-200 group-hover:text-gray-300 transition-colors">
+                                            {op === Operator.MULTIPLY ? '×' : op === Operator.DIVIDE ? '÷' : op}
+                                        </span>
+                                    </div>
+                                    
+                                    <div className="space-y-1 z-10">
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-gray-400">正确率</span>
+                                            <span className={`font-bold ${acc >= 90 ? 'text-green-500' : acc >= 60 ? 'text-yellow-500' : 'text-gray-400'}`}>{acc}%</span>
+                                        </div>
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-gray-400">平均用时</span>
+                                            <span className="font-bold text-gray-700">{avgTime}s</span>
+                                        </div>
+                                        <div className="flex justify-between text-xs pt-2 border-t border-gray-50 mt-2">
+                                            <span className="text-gray-400">已练习</span>
+                                            <span className="text-gray-500">{s.attempts} 题</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             )}
