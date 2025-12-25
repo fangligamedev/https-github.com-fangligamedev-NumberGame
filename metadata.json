@@ -1,0 +1,7 @@
+{
+  "name": "数理探险岛 (Math Quest)",
+  "description": "专为小学生设计的游戏化数学练习应用，结合Gemini AI进行因材施教。",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
