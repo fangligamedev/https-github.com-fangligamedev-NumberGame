@@ -134,14 +134,19 @@ export const analyzeMistakes = async (mistakes: MistakeRecord[]): Promise<string
     if (mistakes.length === 0) return "没有错题，太完美了！";
   
     const recentMistakes = mistakes.slice(-5).map(m => 
-      `${m.question.num1} ${m.question.operator} ${m.question.num2} = ? (User: ${m.userAnswer}, Correct: ${m.question.answer})`
+      `${m.question.num1} ${m.question.operator} ${m.question.num2} = ? (学生填了: ${m.userAnswer}, 正确答案: ${m.question.answer})`
     ).join("\n");
-    const prompt = `Analyze mistakes:\n${recentMistakes}\nOutput: Short, encouraging advice in Chinese.`;
-    const system = `Role: Math tutor for 3rd grader.`;
+    
+    const system = `你是一位上海小学数学名师。你的任务是分析学生的错题并提供深度的启发式指导。
+    不要说"加油"、"注意看题"之类的废话。
+    请针对以下错题，找出可能的错误原因（如：进位错误、退位错误、乘法口诀记错、除法余数理解问题等），并用通俗易懂的语言讲解解题思路和技巧。
+    鼓励学生思考数学本质，而不是死记硬背。`;
+    
+    const prompt = `分析以下这些错题并给出针对性的讲解：\n${recentMistakes}`;
 
     if (useOpenAIProtocol()) {
         const text = await fetchOpenAICompat([{ role: 'user', content: prompt }], system);
-        return text || "加油，下次注意看清题目哦！";
+        return text || "老师正在思考你的错题，请稍后再试。";
     }
 
     const ai = initAI();
@@ -150,22 +155,23 @@ export const analyzeMistakes = async (mistakes: MistakeRecord[]): Promise<string
     try {
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `${system} ${prompt}`,
+        contents: `${system}\n\n${prompt}`,
       });
       return response.text || "加油，下次注意看清题目哦！";
     } catch (error) {
-      return "加油，下次注意看清题目哦！";
+      return "老师正在休息，等下再帮你分析哦。";
     }
 };
 
 export const chatWithTutor = async (history: ChatMessage[], newMessage: string): Promise<string> => {
-  const systemInstruction = `You are a friendly, patient, and fun math tutor for a Chinese 3rd-grade student named "小小探险家". 
-  Your goal is to help them love math. 
-  - Do NOT just give answers to math problems. Guide them to solve it step-by-step.
-  - Use emojis. 
-  - Keep responses concise (under 50 words) unless explaining a concept.
-  - Encourage them to ask questions about "why" and "how".
-  - If they say they are frustrated, comfort them.`;
+  const systemInstruction = `你是一位上海小学数学名师，名字叫“数学岛导师”。
+  你的目标是引导学生真正理解数学逻辑，而不是直接给答案。
+  对话原则：
+  1. 禁止直接给出题目答案。
+  2. 采用启发式教学：如果学生问问题，通过提问来引导他们思考（例如：“你觉得这个进位应该加到哪一列呢？”）。
+  3. 针对具体的数学概念（如乘法分配律、竖式计算、单位换算）进行深度浅出的讲解。
+  4. 使用 emoji 使对话生动，但内容必须干货满满。
+  5. 禁止说“加油”、“你真棒”等空洞的鼓励，必须指出具体的进步点或思考方向。`;
 
   if (useOpenAIProtocol()) {
       // Map history to OpenAI format
@@ -236,18 +242,21 @@ export const generateSpeech = async (text: string): Promise<AudioBuffer | null> 
 export const analyzeStage = async (questions: Question[], answers: {qId: string, correct: boolean, val: number}[]): Promise<string> => {
   const summary = questions.map(q => {
     const ans = answers.find(a => a.qId === q.id);
-    return `Q: ${q.bossText ? q.bossText : `${q.num1}${q.operator}${q.num2}`} | Correct Answer: ${q.answer} | User Result: ${ans?.correct ? 'Correct' : `Wrong (answered ${ans?.val})`}`;
+    return `题目: ${q.bossText ? q.bossText : `${q.num1} ${q.operator} ${q.num2}`} | 正确答案: ${q.answer} | 学生回答: ${ans?.val} | 结果: ${ans?.correct ? '正确' : '错误'}`;
   }).join('\n');
 
-  const prompt = `Analyze this math game stage performance for a 3rd grader:
-  ${summary}
-  Provide a 2-sentence feedback in Chinese. 
-  1. Praise what they did well.
-  2. Point out one specific thing to improve (if any errors) or give a high-five.`;
+  const system = `你是一位上海小学数学专家。请对学生刚完成的这一关表现进行精准点评。
+  要求：
+  1. 不要说"太棒了"、"继续努力"这种泛泛而谈的话。
+  2. 如果有错题，必须指出具体的数学错误逻辑（例如：三位数加法进位忘记了、两位数乘法竖式位值对齐问题等）。
+  3. 如果全对，请给出一个更高维度的数学思考建议或一个巧妙的简算技巧。
+  4. 语言要专业且对孩子亲切，字数控制在100字以内。`;
+
+  const prompt = `这是本关的答题记录：\n${summary}`;
 
   if (useOpenAIProtocol()) {
-      const text = await fetchOpenAICompat([{ role: 'user', content: prompt }]);
-      return text || "做得不错！继续挑战下一关吧！";
+      const text = await fetchOpenAICompat([{ role: 'user', content: prompt }], system);
+      return text || "本关挑战结束！";
   }
 
   const ai = initAI();
@@ -256,7 +265,7 @@ export const analyzeStage = async (questions: Question[], answers: {qId: string,
   try {
     const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: prompt
+        contents: `${system}\n\n${prompt}`
     });
     return response.text || "做得不错！继续挑战下一关吧！";
   } catch (e) {
